@@ -8,8 +8,7 @@
     "start": "next start",
     "worker": "tsx scripts/worker.ts",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy"
+    "db:push": "prisma db push"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
         const item = await client.getMonitor(projectId, monitorId);
         const data: Record<string, unknown> = { projectId, projectName: project.name, seenAt: new Date(), nextRetryAt: null };
         for (const key of KEPT_FIELDS) if (item[key] !== undefined) data[key] = item[key];
-        if (data.models === undefined) data.models = [];
+        // SQLite has no array column type — models is stored as a JSON string.
+        data.models = JSON.stringify(Array.isArray(data.models) ? data.models : []);
 
         await prisma.monitor.upsert({
           where: { id: monitorId },

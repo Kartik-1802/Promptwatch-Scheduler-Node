@@ -3,7 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  // SQLite for now — a single file, no server process, no Docker needed.
+  // Switching to Postgres later is a one-line change here (provider =
+  // "postgresql") plus pointing DATABASE_URL at a real server.
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -53,7 +56,7 @@ model Monitor {
   name              String
   description       String?
   active            Boolean
-  models            Json      @default("[]")
+  models            String    @default("[]") // JSON-encoded string[] — SQLite has no Json/array type
   languageCode      String?
   countryCode       String?
   promptFrequency   String?
@@ -71,7 +74,7 @@ model Schedule {
   monitorId String  @id
   monitor   Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
   enabled   Boolean
-  days      Int[]
+  days      String  // JSON-encoded number[] (0=Mon..6=Sun) — SQLite has no native array type
   startTime String
   endTime   String
 }

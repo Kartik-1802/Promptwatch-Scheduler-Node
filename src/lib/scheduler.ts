@@ -1,8 +1,9 @@
 /** Window evaluation + the background loop that flips monitors on and off.
- * Mirrors scheduler.py. Runs as a setInterval in the persistent Node process
- * (started once from instrumentation.ts) — this only works in a long-running
- * container, not on serverless/edge, which matches the Docker deployment target. */
+ * Mirrors scheduler.py. Runs inside the standalone worker process
+ * (scripts/worker.ts) via setTimeout recursion — needs a persistent Node
+ * process, not serverless/edge. */
 import { prisma } from "./db";
+import { parseDayArray } from "./json";
 import { ApiError, PromptwatchClient } from "./promptwatch";
 import { log } from "./store";
 import { partsAt } from "./tz";
@@ -14,6 +15,13 @@ export interface ScheduleLike {
   days: number[];
   startTime: string;
   endTime: string;
+}
+
+/** Schedule.days is stored as Json (SQLite has no native array type) — validate
+ * and coerce it back to number[] whenever we read a schedule out of the DB. */
+export function toScheduleLike(row: { enabled: boolean; days: string; startTime: string; endTime: string } | null): ScheduleLike | null {
+  if (!row) return null;
+  return { enabled: row.enabled, days: parseDayArray(row.days), startTime: row.startTime, endTime: row.endTime };
 }
 
 function parseHHMM(value: string, fallback: number): number {
@@ -81,7 +89,8 @@ export async function tick(force = false, actor = "Scheduler") {
   const monitors = await prisma.monitor.findMany({ include: { schedule: true } });
 
   for (const monitor of monitors) {
-    const desired = evaluate(monitor.schedule, parts.weekday, minutes);
+    const schedule = toScheduleLike(monitor.schedule);
+    const desired = evaluate(schedule, parts.weekday, minutes);
     if (desired === null || desired === monitor.active) continue;
     if (!force && monitor.nextRetryAt && monitor.nextRetryAt.getTime() > Date.now()) continue;
 

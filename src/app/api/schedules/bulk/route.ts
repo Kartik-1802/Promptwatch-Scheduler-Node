@@ -20,12 +20,14 @@ export async function PUT(req: NextRequest) {
     }
 
     const schedule = cleanSchedule(body);
+    // SQLite has no array column type — days is stored as a JSON string.
+    const row = { ...schedule, days: JSON.stringify(schedule.days) };
     await prisma.$transaction(
       monitorIds.map((monitorId) =>
         prisma.schedule.upsert({
           where: { monitorId },
-          create: { monitorId, ...schedule },
-          update: schedule,
+          create: { monitorId, ...row },
+          update: row,
         })
       )
     );

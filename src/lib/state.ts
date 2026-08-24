@@ -1,5 +1,6 @@
 import { prisma } from "./db";
-import { evaluate, getLastTickAt, nextTransition } from "./scheduler";
+import { parseStringArray } from "./json";
+import { evaluate, getLastTickAt, nextTransition, toScheduleLike } from "./scheduler";
 import { getSettings, publicSettings } from "./store";
 import { partsAt } from "./tz";
 
@@ -14,9 +15,7 @@ export async function buildState() {
   ]);
 
   const monitors = monitorsRaw.map((m) => {
-    const schedule = m.schedule
-      ? { enabled: m.schedule.enabled, days: m.schedule.days, startTime: m.schedule.startTime, endTime: m.schedule.endTime }
-      : null;
+    const schedule = toScheduleLike(m.schedule);
     const desired = evaluate(schedule, parts.weekday, minutes);
     return {
       id: m.id,
@@ -25,7 +24,7 @@ export async function buildState() {
       name: m.name,
       description: m.description,
       active: m.active,
-      models: m.models,
+      models: parseStringArray(m.models),
       languageCode: m.languageCode,
       countryCode: m.countryCode,
       promptFrequency: m.promptFrequency,

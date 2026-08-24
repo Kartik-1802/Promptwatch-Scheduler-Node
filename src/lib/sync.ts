@@ -1,4 +1,4 @@
-/** Pull projects + monitors from Promptwatch into Postgres. Mirrors sync.py. */
+/** Pull projects + monitors from Promptwatch into the local database. Mirrors sync.py. */
 import { prisma } from "./db";
 import { Prisma } from "@prisma/client";
 import { ApiError, PromptwatchClient, PromptwatchMonitor } from "./promptwatch";
@@ -14,7 +14,8 @@ function monitorData(item: PromptwatchMonitor) {
   for (const key of KEPT_MONITOR_FIELDS) {
     if (item[key] !== undefined) data[key] = item[key];
   }
-  if (data.models === undefined) data.models = [];
+  // SQLite has no array column type — models is stored as a JSON string.
+  data.models = JSON.stringify(Array.isArray(data.models) ? data.models : []);
   if (item.updatedAt) data.updatedAt = new Date(item.updatedAt as string);
   return data;
 }
