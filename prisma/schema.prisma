@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  role         String    // viewer | editor | admin | super-admin
+  passwordSalt String
+  passwordHash String
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  createdBy    String?
+  lastLoginAt  DateTime?
+  sessions     Session[]
+}
+
+model Session {
+  token     String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
+  role      String
+  expiresAt DateTime
+}
+
+model Settings {
+  id               Int       @id @default(1)
+  apiKey           String?
+  timezone         String    @default("UTC")
+  tickSeconds      Int       @default(60)
+  schedulerEnabled Boolean   @default(true)
+  lastSyncAt       DateTime?
+}
+
+model Project {
+  id        String    @id
+  name      String
+  slug      String?
+  website   String?
+  createdAt DateTime?
+}
+
+model Monitor {
+  id                String    @id
+  projectId         String
+  projectName       String
+  name              String
+  description       String?
+  active            Boolean
+  models            Json      @default("[]")
+  languageCode      String?
+  countryCode       String?
+  promptFrequency   String?
+  promptCount       Int?
+  responseCount     Int?
+  averageVisibility Float?
+  updatedAt         DateTime?
+  seenAt            DateTime?
+  nextRetryAt       DateTime?
+  staleSince        DateTime?
+  schedule          Schedule?
+}
+
+model Schedule {
+  monitorId String  @id
+  monitor   Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  enabled   Boolean
+  days      Int[]
+  startTime String
+  endTime   String
+}
+
+model LogEntry {
+  id        String   @id @default(cuid())
+  ts        DateTime @default(now())
+  level     String
+  event     String
+  message   String
+  user      String?
+  kind      String?
+  monitorId String?
+  projectId String?
+  code      String?
+
+  @@index([ts])
+}
+
+model ApiCallLog {
+  id     String   @id @default(cuid())
+  ts     DateTime @default(now())
+  method String
+  path   String
+  status Int
+  ms     Int
+  error  String?
+
+  @@index([ts])
+}

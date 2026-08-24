@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: promptwatch
+      POSTGRES_PASSWORD: promptwatch
+      POSTGRES_DB: promptwatch
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Serves the dashboard + API. Stateless — safe to restart anytime.
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://promptwatch:promptwatch@db:5432/promptwatch?schema=public
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-kartik@contentninja.in}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:?set SUPER_ADMIN_PASSWORD in your .env}
+      PROMPTWATCH_BASE_URL: ${PROMPTWATCH_BASE_URL:-https://server.promptwatch.com/api/v2}
+    ports:
+      - "3000:3000"
+    command: sh -c "npx prisma db push --accept-data-loss && npm run start"
+
+  # Runs the automatic activate/deactivate loop, independent of the web
+  # process. Same image, same database — restart it freely without
+  # affecting the dashboard.
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://promptwatch:promptwatch@db:5432/promptwatch?schema=public
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-kartik@contentninja.in}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:?set SUPER_ADMIN_PASSWORD in your .env}
+      PROMPTWATCH_BASE_URL: ${PROMPTWATCH_BASE_URL:-https://server.promptwatch.com/api/v2}
+    command: sh -c "npx prisma db push --accept-data-loss && npm run worker"
+
+volumes:
+  pgdata:

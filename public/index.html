@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Promptwatch Scheduler</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+</head>
+<body>
+<div id="appShell" class="hidden">
+<header class="topbar">
+  <div class="brand"><span class="dot"></span> Promptwatch Scheduler</div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="monitors">Monitors</button>
+    <button class="tab" data-tab="logs">Logs</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab hidden" data-tab="team" id="teamTabBtn">Team</button>
+  </nav>
+  <div class="topmeta">
+    <span id="clock" class="pill" title="Scheduler timezone">—</span>
+    <span id="tickState" class="pill">—</span>
+    <button id="syncBtn" class="btn">Sync</button>
+    <span id="whoami" class="pill who"></span>
+    <button id="logoutBtn" class="btn">Log out</button>
+  </div>
+</header>
+
+<main>
+  <!-- MONITORS -->
+  <section id="tab-monitors" class="panel">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+      <input id="search" class="input" type="search" placeholder="Filter monitors or projects…">
+      <select id="projectFilter" class="input"><option value="">All projects</option></select>
+      <label class="check"><input type="checkbox" id="scheduledOnly"> Scheduled only</label>
+      <label class="check"><input type="checkbox" id="inactiveOnly"> Inactive only</label>
+      <label class="check"><input type="checkbox" id="selectAll"> Select all visible</label>
+      <span class="spacer"></span>
+      <button id="addByIdBtn" class="btn">Add by ID</button>
+      <button id="runNow" class="btn">Run scheduler now</button>
+    </div>
+    <div id="adoptRow" class="card hidden">
+      <h2>Add a monitor by ID</h2>
+      <p class="muted small">Sync already finds every monitor with at least one prompt, active or
+        not. This is only for the rare monitor with zero prompts, which won't show up on its own —
+        copy its ID from the Promptwatch dashboard URL and paste it below.</p>
+      <div class="row">
+        <select id="adoptProject" class="input"></select>
+        <textarea id="adoptIds" class="input grow" rows="3" placeholder="6ba7b818-9dad-11d1-80b4-00c04fd430c8&#10;6ba7b819-9dad-11d1-80b4-00c04fd430c8"></textarea>
+      </div>
+      <div class="row end">
+        <span id="adoptResult" class="muted small"></span>
+        <span class="spacer"></span>
+        <button id="adoptCancel" class="btn">Cancel</button>
+        <button id="adoptSave" class="btn primary">Add monitors</button>
+      </div>
+    </div>
+
+    <div id="bulkBar" class="toolbar bulkbar hidden">
+      <span id="selectedCount" class="pill">0 selected</span>
+      <span class="spacer"></span>
+      <button id="bulkActivate" class="btn">Activate</button>
+      <button id="bulkDeactivate" class="btn">Deactivate</button>
+      <button id="bulkSchedule" class="btn primary">Schedule selected</button>
+      <button id="bulkClearSchedule" class="btn danger">Remove schedules</button>
+    </div>
+
+    <div id="monitorList" class="list"></div>
+    <p id="emptyMonitors" class="empty hidden">No monitors yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
+  </section>
+
+  <!-- LOGS -->
+  <section id="tab-logs" class="panel hidden">
+    <div class="toolbar">
+      <select id="logLevel" class="input">
+        <option value="">All levels</option>
+        <option value="success">Success</option>
+        <option value="info">Info</option>
+        <option value="warn">Warning</option>
+        <option value="error">Error</option>
+      </select>
+      <input id="logSearch" class="input" type="search" placeholder="Filter log text…">
+      <span class="spacer"></span>
+      <label class="check"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
+    </div>
+    <div class="logs">
+      <div class="logrow loghead">
+        <span class="t">Time</span>
+        <span class="lv">Level</span>
+        <span class="user">User</span>
+        <span class="msg">Message</span>
+      </div>
+      <div id="logList"></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="panel hidden">
+    <div class="card">
+      <h2>API key</h2>
+      <p class="muted">Stored server-side in <code>data/db.json</code> and never sent back to this
+        page — you'll only ever see a masked version. Use an <b>organization-level</b> key so
+        projects can be listed.</p>
+      <div class="row">
+        <input id="apiKey" class="input grow" type="password" placeholder="Paste your Promptwatch API key" autocomplete="off">
+        <button id="saveKey" class="btn primary">Save &amp; sync</button>
+        <button id="testKey" class="btn">Test</button>
+        <button id="clearKey" class="btn danger">Remove</button>
+      </div>
+      <p id="keyState" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h2>Scheduler</h2>
+      <div class="row wrap">
+        <label class="field">Timezone
+          <input id="timezone" class="input" list="tzlist" placeholder="e.g. Asia/Kolkata">
+          <datalist id="tzlist"></datalist>
+        </label>
+        <label class="field">Check interval (seconds)
+          <input id="tickSeconds" class="input" type="number" min="10" step="10">
+        </label>
+        <label class="field">Automation
+          <label class="switch"><input type="checkbox" id="schedulerEnabled"><span></span></label>
+        </label>
+        <button id="saveScheduler" class="btn primary">Save</button>
+      </div>
+      <p class="muted">All schedule times are evaluated in this timezone. Turning automation off
+        leaves monitors exactly as they are.</p>
+    </div>
+
+    <div class="card">
+      <h2>API usage per hour <span class="muted small">(last 24 h)</span></h2>
+      <div class="usage-head">
+        <div><b id="uLastHour">0</b><span class="muted small">calls this hour</span></div>
+        <div><b id="u24">0</b><span class="muted small">calls / 24 h</span></div>
+        <div><b id="uErr">0</b><span class="muted small">failed calls</span></div>
+      </div>
+      <div id="usageChart" class="chart"></div>
+      <table class="endpoints"><tbody id="endpointRows"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Account</h2>
+      <p class="muted small">Change the password for the account you're logged in as. Nobody else
+        — including this app's operator — can see it.</p>
+      <div class="row wrap">
+        <input id="curPassword" class="input" type="password" placeholder="Current password" autocomplete="current-password">
+        <input id="newPassword" class="input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password">
+        <input id="newPassword2" class="input" type="password" placeholder="Confirm new password" autocomplete="new-password">
+        <button id="changePasswordBtn" class="btn primary">Change password</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEAM -->
+  <section id="tab-team" class="panel hidden">
+    <div class="card">
+      <h2>Invite a team member</h2>
+      <p class="muted small">Only <code>@contentninja.in</code> addresses can be invited. You set
+        their password and role directly — no email is sent.</p>
+      <div class="row wrap">
+        <input id="inviteEmail" class="input" type="email" placeholder="name@contentninja.in">
+        <select id="inviteRole" class="input">
+          <option value="viewer">Viewer</option>
+          <option value="editor">Editor</option>
+          <option value="admin">Admin</option>
+          <option value="super-admin">Super admin</option>
+        </select>
+        <input id="invitePassword" class="input" type="password" placeholder="Password (min 8 chars)">
+        <button id="inviteBtn" class="btn primary">Invite</button>
+      </div>
+      <p id="inviteError" class="hint"></p>
+    </div>
+    <div class="card">
+      <h2>Team members</h2>
+      <div id="teamList" class="list"></div>
+    </div>
+  </section>
+</main>
+
+</div><!-- /appShell -->
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- Schedule editor -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="modalTitle">Schedule</h2>
+    <p id="modalSub" class="muted small"></p>
+    <label class="switch-row">
+      <label class="switch"><input type="checkbox" id="schEnabled"><span></span></label>
+      <span>Automate this monitor</span>
+    </label>
+    <div class="field-label">Days the window opens</div>
+    <div id="dayPicker" class="days"></div>
+    <div class="row">
+      <label class="field">Active from
+        <input id="schStart" class="input" type="time" value="09:00"></label>
+      <label class="field">until
+        <input id="schEnd" class="input" type="time" value="17:00"></label>
+    </div>
+    <p id="windowHint" class="hint"></p>
+    <div class="row end">
+      <button id="schDelete" class="btn danger">Remove schedule</button>
+      <span class="spacer"></span>
+      <button id="schCancel" class="btn">Cancel</button>
+      <button id="schSave" class="btn primary">Save schedule</button>
+    </div>
+  </div>
+</div>
+
+<!-- Login -->
+<div id="loginScreen" class="modal">
+  <div class="modal-box login-box">
+    <h2>Promptwatch Scheduler</h2>
+    <p class="muted small">Sign in to continue.</p>
+    <div class="field-label">Email</div>
+    <input id="loginEmail" class="input" type="email" placeholder="name@contentninja.in" autocomplete="username">
+    <div class="field-label">Password</div>
+    <input id="loginPassword" class="input" type="password" placeholder="Password" autocomplete="current-password">
+    <p id="loginError" class="hint err-text"></p>
+    <button id="loginBtn" class="btn primary login-submit">Log in</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
