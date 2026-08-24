@@ -1,40 +1,43 @@
-# Promptwatch Scheduler (Node.js / TypeScript)
+# Promptwatch Scheduler
 
-A rewrite of the original Python version (kept as a backup in `Promptwatch Scheduler Main`)
-in Node.js + TypeScript + Next.js — built for running on a server long-term, not just locally.
+A dashboard for automatically activating and deactivating Promptwatch monitors on a weekly
+schedule — pick the days and hours, and each monitor turns on when its window opens and off
+when it closes, every week, on its own. Built with Node.js, TypeScript, and Next.js, with a
+built-in database (SQLite) — no external services required to run it.
 
-Currently uses **SQLite** (a real database, stored as a single file at `data/app.db`) instead
-of the Python version's JSON file — no server process or Docker required to run it. Postgres +
-Docker are set up and ready (`Dockerfile`, `docker-compose.yml`) for whenever you want to move
-to that; switching later is a one-line change (see "Moving to Postgres later" below).
+## What it does
 
-Same features, same tested dashboard (the frontend — `public/index.html`, `style.css`,
-`app.js` — is copied over unchanged from the Python version and talks to identically-shaped
-API endpoints, so nothing about how it looks or behaves changed):
-
-- Automatic weekly activation windows per monitor, with overnight-wrap and all-day support
-- Bulk select, bulk schedule, bulk activate/deactivate
-- Auto-discovery of inactive monitors (via `/prompts` pagination, since `/monitors` only
-  returns active ones)
-- Login with roles (`viewer` / `editor` / `admin` / `super-admin`), team invites restricted
-  to `@contentninja.in`, per-role permission enforcement server-side
-- Logs with user attribution and green/red activate/deactivate coloring
-- API usage-per-hour chart
+- **Automatic scheduling** — set a weekly activation window per monitor (e.g. weekdays
+  09:00–17:00). Supports overnight windows that wrap past midnight, and all-day windows.
+  A background process checks continuously and activates/deactivates monitors through the
+  Promptwatch API exactly when their window opens or closes.
+- **Bulk actions** — select multiple monitors at once to schedule, activate, deactivate, or
+  clear schedules together.
+- **Finds every monitor, not just active ones** — Promptwatch's own API only lists active
+  monitors by default; this app cross-references prompts to discover inactive monitors too, so
+  nothing is missing from the dashboard.
+- **Logins and roles** — a login screen gates the whole app. Four roles (`viewer`, `editor`,
+  `admin`, `super-admin`) control what each person can do, enforced on the server, not just
+  hidden in the UI. The super admin can invite teammates from a restricted email domain,
+  assign roles, reset passwords, and deactivate accounts.
+- **Activity log** — every schedule change, sync, manual toggle, and login is recorded with
+  who did it and when, with activations shown in green and deactivations in red.
+- **API usage chart** — see how many calls are being made to Promptwatch per hour, and where
+  they're going.
 
 ## Architecture
 
 | Piece | What it is |
 |---|---|
-| `app` | Next.js app — serves the dashboard and all `/api/*` routes |
-| `worker` | A separate background process running the scheduler tick loop |
-| `db` | SQLite (`data/app.db`), or Postgres if you switch later |
+| `app` | The Next.js web app — serves the dashboard and every `/api/*` route |
+| `worker` | A background process that runs the scheduling loop |
+| database | SQLite — a single file at `data/app.db`, no separate database server needed |
 
-The **app** and **worker** are two separate processes sharing one database — restarting the
-web app never interrupts automatic scheduling, and vice versa. This is different from the
-Python version, which ran both in a single process; splitting them is the more standard
-pattern for a real server deployment.
+The **app** and **worker** are two independent processes sharing one database file. That
+separation means restarting or updating the web app never interrupts the automatic scheduling
+running in the worker, and vice versa.
 
-## Run it (no Docker needed)
+## Run it locally
 
 Requires Node.js 20+.
 
@@ -49,83 +52,59 @@ npm run worker
 ```
 
 Log in with the email/password from `.env` (`SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD`) —
-that value only matters the first time; after that the real password is a hash in the
-database, changeable from Settings → Account.
+that value only matters the first time the app ever starts; after that, the real password is a
+one-way hash stored in the database, changeable anytime from **Settings → Account**, and not
+recoverable by anyone, including whoever built or hosts this app.
 
-For a production-style run instead of `npm run dev`: `npm run build && npm run start` (plus
-`npm run worker` in parallel, same as above).
+For a production-style local run instead of `npm run dev`:
+```bash
+npm run build
+npm run start:all     # runs the web app and the worker together, one command
+```
 
-## Committing to Git (local only, step by step)
-
-The repo is already initialized with one commit. To make a new commit whenever you've changed
-something:
+## Committing to Git
 
 ```bash
-cd "/Users/contentninja/Downloads/Promptwatch Scheduler Node"
-git status                     # see what changed
-git add -A                     # stage everything
+git status              # see what changed
+git add -A               # stage everything
 git commit -m "describe what changed"
 ```
 
-`.env` and `data/app.db` are already in `.gitignore`, so your API key, passwords, and database
-never get committed — only the code does.
+`.env` and `data/app.db` are in `.gitignore`, so your API key, passwords, and database never
+get committed — only the code does. See your history with `git log --oneline`.
 
-To see your commit history: `git log --oneline`.
+## Deploying so someone else can try it
 
-**This is all local** — nothing has been uploaded anywhere yet. See below for pushing to a
-private GitHub repo when you're ready.
+SQLite plus a background worker process means this needs a host that keeps a real server
+running (not a "serverless functions" platform like plain Vercel, which doesn't keep a
+persistent disk or a long-running background process between requests).
 
-## Pushing to a private GitHub repo (when you're ready)
+**Railway** is a straightforward option that supports both:
 
-1. On github.com: **New repository** → name it → set visibility to **Private** → don't
-   initialize with a README (this folder already has one) → **Create repository**.
-2. GitHub will show you a repo URL like `https://github.com/yourname/promptwatch-scheduler.git`.
-   Run:
-   ```bash
-   cd "/Users/contentninja/Downloads/Promptwatch Scheduler Node"
-   git remote add origin https://github.com/yourname/promptwatch-scheduler.git
-   git branch -M main
-   git push -u origin main
+1. Push this repo to GitHub (private is fine — Railway just needs read access).
+2. On [railway.app](https://railway.app): **New Project → Deploy from GitHub repo** → select
+   this repo.
+3. Add a **Volume**, mounted at `/app/data` — this is what makes the database survive restarts
+   and deploys.
+4. In the service's **Variables**, set:
+   - `DATABASE_URL` = `file:/app/data/app.db` (an absolute path, since the volume is mounted there)
+   - `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` — the first login
+   - `PROMPTWATCH_BASE_URL` (optional — only needed if not using the default Promptwatch API host)
+5. In the service's **Settings → Deploy**, set the **Start Command** to:
    ```
-3. To give `harshsingh94@gmail.com` access to the **code repo**: on GitHub, go to your repo →
-   **Settings → Collaborators → Add people** → enter their GitHub username or the email their
-   GitHub account uses.
+   npx prisma db push --accept-data-loss && npm run start:all
+   ```
+   (`db push` sets up the database tables on first deploy; `start:all` runs the web app and
+   the scheduler worker together.)
+6. Deploy. Railway gives you a public URL (like `yourapp.up.railway.app`) — share that with
+   whoever needs to try it, and they log in the same way as locally.
 
-   Note: this is different from giving them a **login to the running app**. The app's own Team
-   tab only allows inviting `@contentninja.in` addresses — a `gmail.com` address can't be
-   invited there as-is. If you want them logging into the dashboard itself, either give them a
-   `@contentninja.in` address, or let me know and I can loosen that restriction.
-
-## Deploying to a real server later
-
-1. Push to GitHub (above).
-2. Simplest path without Docker: install Node.js on the server, clone the repo, `npm install`,
-   `npx prisma db push`, then run the app and worker persistently (a process manager like `pm2`
-   keeps them alive across reboots/crashes: `pm2 start npm --name app -- run start` and
-   `pm2 start npm --name worker -- run worker`).
-3. With Docker instead (already set up): `docker compose up --build -d` starts Postgres, the
-   app, and the worker together.
-4. Either way, put a reverse proxy in front for HTTPS — Caddy is the simplest option for a
-   non-technical setup: point a domain at the server, then a two-line Caddyfile
-   (`yourdomain.com { reverse_proxy localhost:3000 }`) gets you automatic HTTPS with no manual
-   certificate work.
-
-## Moving to Postgres later
-
-Only worth it once you have real concurrent traffic or want managed backups. To switch:
-
-1. In `prisma/schema.prisma`, change `provider = "sqlite"` to `provider = "postgresql"` in the
-   `datasource` block.
-2. Change `Schedule.days` back to `Int[]` and `Monitor.models` back to `Json` (Postgres
-   supports both natively — SQLite doesn't, which is why they're JSON-encoded strings today).
-3. Point `DATABASE_URL` at a real Postgres connection string, then `npx prisma db push`.
-4. Use `docker compose up --build` for a one-command Postgres + app + worker setup, or point at
-   a managed Postgres (Railway, Supabase, RDS, etc).
+Once it's live, invite additional people from **Team** in the app itself (super admin only) —
+that's separate from GitHub access, and controls who can log into the running app.
 
 ## Roles
 
-Identical to the Python version — enforced server-side in every API route, not just hidden in
-the UI:
+Enforced on the server for every action, not just hidden in the interface:
 
 | Role | View | Toggle/schedule monitors, sync | API key / scheduler settings | Manage team |
 |---|---|---|---|---|
@@ -134,38 +113,41 @@ the UI:
 | Admin | ✅ | ✅ | ✅ | – |
 | Super admin | ✅ | ✅ | ✅ | ✅ |
 
+Team invites are restricted to a specific email domain by default (configured in
+`src/lib/auth.ts` as `INVITE_DOMAIN`), so only people with an approved address can be added.
+
 ## Files
 
 | Path | Purpose |
 |---|---|
 | `src/app/api/**` | API routes — one folder per endpoint |
 | `src/lib/auth.ts` | Password hashing, sessions, roles, team management |
-| `src/lib/promptwatch.ts` | Promptwatch API client |
-| `src/lib/scheduler.ts` | Window math + the tick loop |
-| `src/lib/sync.ts` | Pulls projects/monitors from Promptwatch |
-| `src/lib/state.ts` | Builds the dashboard's `/api/state` response |
-| `src/lib/json.ts` | JSON encode/decode helpers for SQLite's list fields |
+| `src/lib/promptwatch.ts` | The Promptwatch API client |
+| `src/lib/scheduler.ts` | Window math (is a monitor inside its active window right now?) and the tick loop |
+| `src/lib/sync.ts` | Pulls projects and monitors in from Promptwatch |
+| `src/lib/state.ts` | Builds the dashboard's main `/api/state` response |
+| `src/lib/json.ts` | Encode/decode helpers for the list fields SQLite can't store natively |
 | `scripts/worker.ts` | Entry point for the background worker process |
 | `prisma/schema.prisma` | Database schema |
-| `public/` | The dashboard UI (unchanged from the Python version) |
+| `public/` | The dashboard's HTML/CSS/JS |
 | `data/app.db` | The SQLite database file — gitignored, never committed |
-| `Dockerfile`, `docker-compose.yml` | Container setup, ready for the Postgres move |
+| `Dockerfile`, `docker-compose.yml` | Optional container setup, useful if moving to Postgres |
 
 ## Environment variables
 
-See `.env.example`. `DATABASE_URL` points at the SQLite file (or Postgres, once you switch);
-`SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` seed the first login (once a user exists in the
-database, these stop being used — the real password is only a hash, and only you know it);
-`PROMPTWATCH_BASE_URL` overrides the Promptwatch API host (used for testing).
+See `.env.example`. `DATABASE_URL` points at the SQLite file (or a Postgres server, if you
+move to that later); `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` seed the very first login
+(once any user exists in the database, these two stop being used); `PROMPTWATCH_BASE_URL`
+overrides which Promptwatch API host to talk to.
 
-## What's different from the Python version
+## Moving to Postgres later
 
-- **Database**: a real SQLite database via Prisma, instead of a JSON file — proper schema,
-  ready to move to Postgres with a one-line config change when you need it.
-- **Sessions**: stored in the database instead of in memory, so restarting the app no longer
-  logs everyone out.
-- **Password hashing**: Node's built-in `scrypt` instead of Python's `PBKDF2` — same idea
-  (salted, slow, one-way), different algorithm, no extra dependency either way.
-- **Scheduler**: a separate worker process instead of a background thread in the web server —
-  standard practice for a real deployment, and it means a web app restart/deploy never
-  interrupts scheduled activations.
+Worth doing once there's real concurrent traffic or a need for managed backups — SQLite is
+plenty for a small team.
+
+1. In `prisma/schema.prisma`, change `provider = "sqlite"` to `provider = "postgresql"`.
+2. Change `Schedule.days` back to `Int[]` and `Monitor.models` back to `Json` — Postgres
+   supports both natively (SQLite doesn't, which is why they're JSON-encoded strings today).
+3. Point `DATABASE_URL` at a real Postgres connection string, then run `npx prisma db push`.
+4. `docker compose up --build` brings up Postgres, the app, and the worker together in one
+   command, using the `Dockerfile`/`docker-compose.yml` already in this repo.
