@@ -2,8 +2,7 @@
 
 A dashboard for automatically activating and deactivating Promptwatch monitors on a weekly
 schedule — pick the days and hours, and each monitor turns on when its window opens and off
-when it closes, every week, on its own. Built with Node.js, TypeScript, and Next.js, backed by
-PostgreSQL.
+when it closes, every week, on its own. Built with Node.js, TypeScript, Next.js, and PostgreSQL.
 
 ## What it does
 
@@ -31,7 +30,7 @@ PostgreSQL.
 |---|---|
 | `app` | The Next.js web app — serves the dashboard and every `/api/*` route |
 | `worker` | A background process that runs the scheduling loop |
-| `db` | PostgreSQL — one server, shared by `app` and `worker` |
+| `db` | PostgreSQL — a separate database server, shared by `app` and `worker` |
 
 The **app** and **worker** are two independent processes sharing one database. That
 separation means restarting or updating the web app never interrupts the automatic scheduling
@@ -39,7 +38,7 @@ running in the worker, and vice versa.
 
 ## Run it locally with Docker (recommended)
 
-Requires Docker.
+Requires Docker and Docker Compose.
 
 ```bash
 cp .env.example .env          # edit SUPER_ADMIN_PASSWORD if you want a different one
@@ -48,21 +47,25 @@ docker compose up --build     # dashboard at http://localhost:3000
 
 This brings up three services: `db` (Postgres, with its data in a named volume so it survives
 restarts and rebuilds), `app` (the dashboard, on port 3000), and `worker` (the scheduling loop).
-Both `app` and `worker` run `prisma db push` against `db` on startup, so the schema is always
-up to date — no separate migration step needed.
+`app` runs `prisma db push` against `db` on startup to keep the schema in sync; `worker` waits
+for `app` to be healthy before starting, so it never races `app` to set up the schema.
 
 Log in with the email/password from `.env` (`SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD`) —
 that value only matters the first time the app ever starts; after that, the real password is a
 one-way hash stored in the database, changeable anytime from **Settings → Account**, and not
 recoverable by anyone, including whoever built or hosts this app.
 
+To stop the stack without losing data: `docker compose stop`. `docker compose down` also stops
+it and is safe too (the database lives in the `pgdata` named volume, not in the containers) —
+just don't add `-v`, which deletes volumes.
+
 ## Run it locally without Docker
 
-Requires Node.js 20+ and a Postgres server. The easiest way to get one is to let Docker Compose
-run just the database and point the app at it directly:
+Requires Node.js 20+ and a Postgres server. The easiest way to get one is to start just the
+`db` service from Docker Compose and run the app on the host:
 
 ```bash
-docker compose up db          # starts Postgres on localhost:5432 only
+docker compose up db          # Postgres only, on localhost:5432
 
 npm install
 cp .env.example .env          # DATABASE_URL already points at localhost:5432 by default
@@ -101,21 +104,23 @@ too:
 
 1. Push this repo to GitHub (private is fine — Railway just needs read access).
 2. On [railway.app](https://railway.app): **New Project → Deploy from GitHub repo** → select
-   this repo.
-3. Add a **PostgreSQL** database to the project (Railway provisions one and gives you a
-   `DATABASE_URL` you can reference from the app service's variables).
-4. In the app/worker services' **Variables**, set:
-   - `DATABASE_URL` — reference the Postgres service's connection string
+   this repo, then **+ New → Database → Add PostgreSQL** in the same project.
+3. In the app/worker services' **Variables**, set:
+   - `DATABASE_URL` = reference Railway's Postgres plugin variable (usually
+     `${{Postgres.DATABASE_URL}}`)
    - `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` — the first login
    - `PROMPTWATCH_BASE_URL` (optional — only needed if not using the default Promptwatch API host)
-5. In the service's **Settings → Deploy**, set the **Start Command** to:
+4. In the service's **Settings → Deploy**, set the **Start Command** to:
    ```
    npx prisma db push --accept-data-loss && npm run start:all
    ```
    (`db push` sets up the database tables on first deploy; `start:all` runs the web app and
    the scheduler worker together.)
-6. Deploy. Railway gives you a public URL (like `yourapp.up.railway.app`) — share that with
+5. Deploy. Railway gives you a public URL (like `yourapp.up.railway.app`) — share that with
    whoever needs to try it, and they log in the same way as locally.
+
+Any other host that can run this repo's `Dockerfile`/`docker-compose.yml` and provide a
+Postgres database works too — the app just needs `DATABASE_URL` pointing at it.
 
 Once it's live, invite additional people from **Team** in the app itself (super admin only) —
 that's separate from GitHub access, and controls who can log into the running app.
@@ -148,7 +153,8 @@ Team invites are restricted to a specific email domain by default (configured in
 | `scripts/worker.ts` | Entry point for the background worker process |
 | `prisma/schema.prisma` | Database schema (PostgreSQL) |
 | `public/` | The dashboard's HTML/CSS/JS |
-| `Dockerfile`, `docker-compose.yml` | Container setup — Postgres, app, and worker together |
+| `Dockerfile` | Builds the app/worker image (Node 20 + OpenSSL, needed by Prisma's engine) |
+| `docker-compose.yml` | Runs `db` (Postgres), `app`, and `worker` together |
 
 ## Environment variables
 

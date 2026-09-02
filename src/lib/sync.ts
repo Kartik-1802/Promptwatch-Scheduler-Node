@@ -14,7 +14,7 @@ function monitorData(item: PromptwatchMonitor) {
   for (const key of KEPT_MONITOR_FIELDS) {
     if (item[key] !== undefined) data[key] = item[key];
   }
-  // SQLite has no array column type — models is stored as a JSON string.
+  // models is stored as a JSON-encoded string — see src/lib/json.ts.
   data.models = JSON.stringify(Array.isArray(data.models) ? data.models : []);
   if (item.updatedAt) data.updatedAt = new Date(item.updatedAt as string);
   return data;

@@ -4,7 +4,7 @@
 FROM node:20-alpine
 WORKDIR /app
 
-# Prisma's query engine needs OpenSSL on Alpine.
+# Prisma's query engine needs OpenSSL, which isn't in the base alpine image.
 RUN apk add --no-cache openssl
 
 COPY package.json package-lock.json* ./
