@@ -29,6 +29,12 @@ services:
     ports:
       - "3000:3000"
     command: sh -c "npx prisma db push --accept-data-loss && npm run start"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # Runs the automatic activate/deactivate loop, independent of the web
   # process. Same image, same database — restart it freely without
