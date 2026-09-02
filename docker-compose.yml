@@ -45,12 +45,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Only `app` runs `prisma db push` (see its command below). Waiting on
+      # app's healthcheck here means the schema is guaranteed to exist before
+      # the worker starts, instead of both services racing to push it at once
+      # (which fails intermittently against a brand-new database).
+      app:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://promptwatch:promptwatch@db:5432/promptwatch?schema=public
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-kartik@contentninja.in}
       SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:?set SUPER_ADMIN_PASSWORD in your .env}
       PROMPTWATCH_BASE_URL: ${PROMPTWATCH_BASE_URL:-https://server.promptwatch.com/api/v2}
-    command: sh -c "npx prisma db push --accept-data-loss && npm run worker"
+    command: npm run worker
 
 volumes:
   pgdata:
