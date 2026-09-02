@@ -17,8 +17,8 @@ export interface ScheduleLike {
   endTime: string;
 }
 
-/** Schedule.days is stored as Json (SQLite has no native array type) — validate
- * and coerce it back to number[] whenever we read a schedule out of the DB. */
+/** Schedule.days is stored as a JSON-encoded string — validate and coerce it
+ * back to number[] whenever we read a schedule out of the DB. */
 export function toScheduleLike(row: { enabled: boolean; days: string; startTime: string; endTime: string } | null): ScheduleLike | null {
   if (!row) return null;
   return { enabled: row.enabled, days: parseDayArray(row.days), startTime: row.startTime, endTime: row.endTime };

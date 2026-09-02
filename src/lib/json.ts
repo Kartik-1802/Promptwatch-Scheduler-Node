@@ -1,6 +1,6 @@
-/** SQLite has no native array/JSON column type, so list fields (Monitor.models,
- * Schedule.days) are stored as JSON-encoded strings — these helpers keep the
- * parse/stringify at the edges instead of scattered through the codebase. */
+/** List fields (Monitor.models, Schedule.days) are stored as JSON-encoded
+ * strings — these helpers keep the parse/stringify at the edges instead of
+ * scattered through the codebase. */
 
 export function parseStringArray(value: string | null | undefined): string[] {
   if (!value) return [];
