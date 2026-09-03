@@ -17,6 +17,7 @@ export type Role = (typeof ROLES)[number];
 export const VIEW_ROLES = new Set<Role>(["viewer", "editor", "admin", "super-admin"]);
 export const MUTATE_ROLES = new Set<Role>(["editor", "admin", "super-admin"]);
 export const SETTINGS_ROLES = new Set<Role>(["admin", "super-admin"]);
+export const TEAM_ROLES = new Set<Role>(["admin", "super-admin"]);
 export const SUPERADMIN_ROLES = new Set<Role>(["super-admin"]);
 
 export class AuthError extends Error {
@@ -162,13 +163,16 @@ export async function changePassword(userId: string, currentPassword: string, ne
   await log("info", "auth", `${user.email} changed their password`, { user: user.email });
 }
 
-// --- team management (super-admin only, enforced by the caller) ---------
-export async function inviteUser(inviterEmail: string, emailRaw: string, role: string, password: string) {
+// --- team management (admin/super-admin, enforced by the caller via TEAM_ROLES) ---
+export async function inviteUser(inviterEmail: string, inviterRole: Role, emailRaw: string, role: string, password: string) {
   const email = (emailRaw || "").trim().toLowerCase();
   if (!email.endsWith(INVITE_DOMAIN)) {
     throw new AuthError(400, `Invited emails must end with ${INVITE_DOMAIN}`);
   }
   if (!ROLES.includes(role as Role)) throw new AuthError(400, "Invalid role.");
+  if (role === "super-admin" && inviterRole !== "super-admin") {
+    throw new AuthError(400, "Only a super admin can create another super admin.");
+  }
   if (await findUser(email)) throw new AuthError(400, "A user with that email already exists.");
   checkPasswordStrength(password);
 
@@ -182,6 +186,7 @@ export async function inviteUser(inviterEmail: string, emailRaw: string, role: s
 
 export async function updateUser(
   actorEmail: string,
+  actorRole: Role,
   userId: string,
   fields: { role?: string; password?: string; active?: boolean }
 ) {
@@ -189,6 +194,9 @@ export async function updateUser(
   if (!user) throw new AuthError(404, "Unknown user.");
   if (user.role === "super-admin" && ((fields.role && fields.role !== "super-admin") || fields.active === false)) {
     throw new AuthError(400, "Can't change the super admin's role or deactivate them.");
+  }
+  if (fields.role === "super-admin" && actorRole !== "super-admin") {
+    throw new AuthError(400, "Only a super admin can promote someone to super admin.");
   }
 
   const data: Record<string, unknown> = {};

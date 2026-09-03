@@ -32,7 +32,7 @@ model Session {
 model Settings {
   id               Int       @id @default(1)
   apiKey           String?
-  timezone         String    @default("UTC")
+  timezone         String    @default("Asia/Kolkata")
   tickSeconds      Int       @default(60)
   schedulerEnabled Boolean   @default(true)
   lastSyncAt       DateTime?
@@ -64,16 +64,27 @@ model Monitor {
   seenAt            DateTime?
   nextRetryAt       DateTime?
   staleSince        DateTime?
-  schedule          Schedule?
+  scheduleBlocks    ScheduleBlock[]
 }
 
-model Schedule {
-  monitorId String  @id
-  monitor   Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
-  enabled   Boolean
-  days      String  // JSON-encoded number[] (0=Mon..6=Sun) — see src/lib/json.ts
+// A monitor can have several of these — each is a single (startDay,startTime)
+// to (endDay,endTime) window within the week (0=Mon..6=Sun), sent ON when it
+// opens and OFF when it closes. Blocks belonging to the same monitor may
+// never overlap or touch (enforced in src/lib/scheduler.ts's blocksOverlap,
+// checked by every route that creates or edits a block) so a given moment
+// always maps to at most one block, keeping "should this monitor be on right
+// now" unambiguous.
+model ScheduleBlock {
+  id        String   @id @default(cuid())
+  monitorId String
+  monitor   Monitor  @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  startDay  Int      // 0=Mon..6=Sun
   startTime String
+  endDay    Int      // 0=Mon..6=Sun
   endTime   String
+  createdAt DateTime @default(now())
+
+  @@index([monitorId])
 }
 
 model LogEntry {

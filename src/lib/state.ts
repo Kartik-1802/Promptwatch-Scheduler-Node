@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { parseStringArray } from "./json";
-import { evaluate, getLastTickAt, nextTransition, toScheduleLike } from "./scheduler";
+import { evaluate, getLastTickAt, nextTransition, toBlockLike } from "./scheduler";
 import { getSettings, publicSettings } from "./store";
 import { partsAt } from "./tz";
 
@@ -11,12 +11,15 @@ export async function buildState() {
 
   const [projects, monitorsRaw] = await Promise.all([
     prisma.project.findMany({ orderBy: { name: "asc" } }),
-    prisma.monitor.findMany({ include: { schedule: true }, orderBy: [{ projectName: "asc" }, { name: "asc" }] }),
+    prisma.monitor.findMany({
+      include: { scheduleBlocks: { orderBy: { createdAt: "asc" } } },
+      orderBy: [{ projectName: "asc" }, { name: "asc" }],
+    }),
   ]);
 
   const monitors = monitorsRaw.map((m) => {
-    const schedule = toScheduleLike(m.schedule);
-    const desired = evaluate(schedule, parts.weekday, minutes);
+    const blocks = m.scheduleBlocks.map(toBlockLike);
+    const desired = evaluate(blocks, parts.weekday, minutes);
     return {
       id: m.id,
       projectId: m.projectId,
@@ -32,10 +35,16 @@ export async function buildState() {
       responseCount: m.responseCount,
       averageVisibility: m.averageVisibility,
       staleSince: m.staleSince ? m.staleSince.toISOString() : null,
-      schedule,
+      blocks: m.scheduleBlocks.map((b) => ({
+        id: b.id,
+        startDay: b.startDay,
+        startTime: b.startTime,
+        endDay: b.endDay,
+        endTime: b.endTime,
+      })),
       desiredActive: desired,
       inWindow: desired,
-      nextTransition: nextTransition(schedule, settings.timezone),
+      nextTransition: nextTransition(blocks, settings.timezone),
     };
   });
 

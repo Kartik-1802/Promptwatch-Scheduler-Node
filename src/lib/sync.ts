@@ -60,10 +60,25 @@ export async function runSync(actor = "System") {
 
     for (const item of remote) {
       seenIds.add(item.id);
+      // The list endpoint above (GET /monitors) can return an abbreviated
+      // "name" for a monitor compared to its own single-record endpoint —
+      // e.g. two Promptwatch monitors that look identically named here even
+      // though one is really "X" and the other "X - 0 monitor". Re-fetch the
+      // full record so the name (and every other field) always comes from
+      // the authoritative source, the same way discovered monitors already
+      // do a few lines below. Falls back to the list item if that fails, so
+      // a single bad monitor can't stall the whole sync.
+      let full = item;
+      try {
+        full = await client.getMonitor(project.id, item.id);
+      } catch (err) {
+        const apiErr = err as ApiError;
+        errors.push(`${project.name} (monitor ${item.id} detail fetch): ${apiErr.message}`);
+      }
       await prisma.monitor.upsert({
         where: { id: item.id },
-        create: { id: item.id, projectId: project.id, projectName: project.name, seenAt: new Date(), ...monitorData(item) } as Prisma.MonitorUncheckedCreateInput,
-        update: { projectId: project.id, projectName: project.name, seenAt: new Date(), nextRetryAt: null, ...monitorData(item) },
+        create: { id: item.id, projectId: project.id, projectName: project.name, seenAt: new Date(), ...monitorData(full) } as Prisma.MonitorUncheckedCreateInput,
+        update: { projectId: project.id, projectName: project.name, seenAt: new Date(), nextRetryAt: null, ...monitorData(full) },
       });
       monitorCount++;
     }
@@ -126,13 +141,13 @@ export async function runSync(actor = "System") {
     }
   }
 
-  // Drop schedules whose monitor is gone.
+  // Drop schedule blocks whose monitor is gone.
   const liveIds = await prisma.monitor.findMany({ select: { id: true } });
   const liveIdSet = new Set(liveIds.map((m) => m.id));
-  const orphanedSchedules = await prisma.schedule.findMany({ select: { monitorId: true } });
-  const toDelete = orphanedSchedules.filter((s) => !liveIdSet.has(s.monitorId)).map((s) => s.monitorId);
+  const orphanedBlocks = await prisma.scheduleBlock.findMany({ select: { monitorId: true } });
+  const toDelete = [...new Set(orphanedBlocks.filter((b) => !liveIdSet.has(b.monitorId)).map((b) => b.monitorId))];
   if (toDelete.length) {
-    await prisma.schedule.deleteMany({ where: { monitorId: { in: toDelete } } });
+    await prisma.scheduleBlock.deleteMany({ where: { monitorId: { in: toDelete } } });
   }
 
   await prisma.settings.update({ where: { id: 1 }, data: { lastSyncAt: new Date() } });

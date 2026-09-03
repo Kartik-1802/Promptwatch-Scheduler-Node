@@ -9,204 +9,293 @@
 </head>
 <body>
 <div id="appShell" class="hidden">
-<header class="topbar">
-  <div class="brand"><span class="dot"></span> Promptwatch Scheduler</div>
-  <nav class="tabs">
-    <button class="tab active" data-tab="monitors">Monitors</button>
-    <button class="tab" data-tab="logs">Logs</button>
-    <button class="tab" data-tab="settings">Settings</button>
-    <button class="tab hidden" data-tab="team" id="teamTabBtn">Team</button>
-  </nav>
-  <div class="topmeta">
-    <span id="clock" class="pill" title="Scheduler timezone">—</span>
-    <span id="tickState" class="pill">—</span>
-    <button id="syncBtn" class="btn">Sync</button>
-    <span id="whoami" class="pill who"></span>
-    <button id="logoutBtn" class="btn">Log out</button>
-  </div>
-</header>
+<div class="shell">
 
-<main>
-  <!-- MONITORS -->
-  <section id="tab-monitors" class="panel">
-    <div class="stats" id="stats"></div>
-    <div class="toolbar">
-      <input id="search" class="input" type="search" placeholder="Filter monitors or projects…">
-      <select id="projectFilter" class="input"><option value="">All projects</option></select>
-      <label class="check"><input type="checkbox" id="scheduledOnly"> Scheduled only</label>
-      <label class="check"><input type="checkbox" id="inactiveOnly"> Inactive only</label>
-      <label class="check"><input type="checkbox" id="selectAll"> Select all visible</label>
-      <span class="spacer"></span>
-      <button id="addByIdBtn" class="btn">Add by ID</button>
-      <button id="runNow" class="btn">Run scheduler now</button>
+  <aside class="sidebar">
+    <div class="side-logo">⏱</div>
+    <nav class="side-nav">
+      <button class="side-btn active" data-tab="monitors" title="Monitors">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5v5H3V7Zm0 6h7v5H5a2 2 0 0 1-2-2v-3Zm9 5v-5h9v3a2 2 0 0 1-2 2h-7Zm0-7V5h7a2 2 0 0 1 2 2v4h-9Z"/></svg>
+        <span>Monitors</span>
+      </button>
+      <button class="side-btn" data-tab="logs" title="Logs">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4V5Zm0 6h16v2H4v-2Zm0 6h10v2H4v-2Z"/></svg>
+        <span>Logs</span>
+      </button>
+      <button class="side-btn" data-tab="settings" title="Settings">
+        <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm8.4 4a7.4 7.4 0 0 0-.13-1.36l2.11-1.65-2-3.46-2.49 1a7.6 7.6 0 0 0-2.36-1.36L15.1 2h-4l-.43 2.17a7.6 7.6 0 0 0-2.36 1.36l-2.49-1-2 3.46 2.11 1.65a7.4 7.4 0 0 0 0 2.72L3.82 14 5.8 17.5l2.49-1a7.6 7.6 0 0 0 2.36 1.36L11.1 20h4l.43-2.17a7.6 7.6 0 0 0 2.36-1.36l2.49 1 2-3.46-2.11-1.65c.09-.44.13-.9.13-1.36Z"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="side-btn hidden" data-tab="team" id="teamTabBtn" title="Team">
+        <svg viewBox="0 0 24 24"><path d="M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 3c-3.3 0-6 1.6-6 4v2h12v-2c0-2.4-2.7-4-6-4Zm7 0c-.5 0-1 .03-1.5.1 1 .9 1.5 2 1.5 3.4v2h5v-1.5c0-2-2.2-4-5-4Z"/></svg>
+        <span>Team</span>
+      </button>
+    </nav>
+    <div class="side-nav side-bottom">
+      <button id="syncBtn" class="side-btn" title="Sync monitors">
+        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.94 13h-2.02a6 6 0 1 1-1.6-6.02L13 10h7V3l-2.35 3.35Z"/></svg>
+        <span>Sync</span>
+      </button>
+      <button id="logoutBtn" class="side-btn" title="Log out">
+        <svg viewBox="0 0 24 24"><path d="M10 3h6a2 2 0 0 1 2 2v3h-2V5h-6v14h6v-3h2v3a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.6 7H3v2h10.6l-2.3 2.3 1.4 1.4L17 12l-4.3-4.3-1.4 1.4 2.3 2.3Z"/></svg>
+        <span>Log out</span>
+      </button>
     </div>
-    <div id="adoptRow" class="card hidden">
-      <h2>Add a monitor by ID</h2>
-      <p class="muted small">Sync already finds every monitor with at least one prompt, active or
-        not. This is only for the rare monitor with zero prompts, which won't show up on its own —
-        copy its ID from the Promptwatch dashboard URL and paste it below.</p>
-      <div class="row">
-        <select id="adoptProject" class="input"></select>
-        <textarea id="adoptIds" class="input grow" rows="3" placeholder="6ba7b818-9dad-11d1-80b4-00c04fd430c8&#10;6ba7b819-9dad-11d1-80b4-00c04fd430c8"></textarea>
+  </aside>
+
+  <main class="content">
+    <header class="topline">
+      <div>
+        <h1 id="pageTitle">Projects</h1>
+        <p class="sub" id="pageSub">Pick a project to see its monitors, or manage everything at once.</p>
       </div>
-      <div class="row end">
-        <span id="adoptResult" class="muted small"></span>
-        <span class="spacer"></span>
-        <button id="adoptCancel" class="btn">Cancel</button>
-        <button id="adoptSave" class="btn primary">Add monitors</button>
+      <div class="topmeta">
+        <span id="tickState" class="pill"><span class="dot"></span><span id="tickLabel">—</span></span>
       </div>
-    </div>
+    </header>
 
-    <div id="bulkBar" class="toolbar bulkbar hidden">
-      <span id="selectedCount" class="pill">0 selected</span>
-      <span class="spacer"></span>
-      <button id="bulkActivate" class="btn">Activate</button>
-      <button id="bulkDeactivate" class="btn">Deactivate</button>
-      <button id="bulkSchedule" class="btn primary">Schedule selected</button>
-      <button id="bulkClearSchedule" class="btn danger">Remove schedules</button>
-    </div>
-
-    <div id="monitorList" class="list"></div>
-    <p id="emptyMonitors" class="empty hidden">No monitors yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
-  </section>
-
-  <!-- LOGS -->
-  <section id="tab-logs" class="panel hidden">
-    <div class="toolbar">
-      <select id="logLevel" class="input">
-        <option value="">All levels</option>
-        <option value="success">Success</option>
-        <option value="info">Info</option>
-        <option value="warn">Warning</option>
-        <option value="error">Error</option>
-      </select>
-      <input id="logSearch" class="input" type="search" placeholder="Filter log text…">
-      <span class="spacer"></span>
-      <label class="check"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
-    </div>
-    <div class="logs">
-      <div class="logrow loghead">
-        <span class="t">Time</span>
-        <span class="lv">Level</span>
-        <span class="user">User</span>
-        <span class="msg">Message</span>
+    <!-- MONITORS -->
+    <section id="tab-monitors" class="panel">
+      <div class="stats-block" id="statsBlock">
+        <div class="stat-primary" id="statPrimary"></div>
+        <div class="stat-secondary" id="statSecondary"></div>
       </div>
-      <div id="logList"></div>
-    </div>
-  </section>
 
-  <!-- SETTINGS -->
-  <section id="tab-settings" class="panel hidden">
-    <div class="card">
-      <h2>API key</h2>
-      <p class="muted">Stored server-side in <code>data/db.json</code> and never sent back to this
-        page — you'll only ever see a masked version. Use an <b>organization-level</b> key so
-        projects can be listed.</p>
-      <div class="row">
-        <input id="apiKey" class="input grow" type="password" placeholder="Paste your Promptwatch API key" autocomplete="off">
-        <button id="saveKey" class="btn primary">Save &amp; sync</button>
-        <button id="testKey" class="btn">Test</button>
-        <button id="clearKey" class="btn danger">Remove</button>
+      <!-- FOLDER VIEW -->
+      <div id="folderView">
+        <div class="toolbar">
+          <input id="folderSearch" class="input grow" type="search" placeholder="Search projects…">
+          <span class="spacer"></span>
+          <button id="runNow" class="btn">Run scheduler now</button>
+        </div>
+        <div id="folderGrid" class="folder-grid"></div>
+        <p id="emptyFolders" class="empty hidden">No projects yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
       </div>
-      <p id="keyState" class="muted"></p>
-    </div>
 
-    <div class="card">
-      <h2>Scheduler</h2>
-      <div class="row wrap">
-        <label class="field">Timezone
-          <input id="timezone" class="input" list="tzlist" placeholder="e.g. Asia/Kolkata">
-          <datalist id="tzlist"></datalist>
-        </label>
-        <label class="field">Check interval (seconds)
-          <input id="tickSeconds" class="input" type="number" min="10" step="10">
-        </label>
-        <label class="field">Automation
-          <label class="switch"><input type="checkbox" id="schedulerEnabled"><span></span></label>
-        </label>
-        <button id="saveScheduler" class="btn primary">Save</button>
+      <!-- PROJECT DETAIL -->
+      <div id="projectView" class="hidden">
+        <div class="crumbs">
+          <button id="backToFolders" class="btn ghost">← All projects</button>
+          <div class="crumb-icon" id="projectViewIcon"></div>
+          <h2 id="projectViewTitle"></h2>
+        </div>
+
+        <div class="toolbar">
+          <input id="search" class="input grow" type="search" placeholder="Filter monitors…">
+          <label class="check"><input type="checkbox" id="scheduledOnly"> Scheduled only</label>
+          <label class="check"><input type="checkbox" id="inactiveOnly"> Inactive only</label>
+          <label class="check"><input type="checkbox" id="selectAll"> Select all visible</label>
+          <span class="spacer"></span>
+          <button id="addByIdBtn" class="btn">Add by ID</button>
+        </div>
+
+        <div id="adoptRow" class="card hidden">
+          <h2>Add a monitor by ID</h2>
+          <p class="muted small">Sync already finds every monitor with at least one prompt, active or
+            not. This is only for the rare monitor with zero prompts, which won't show up on its own —
+            copy its ID from the Promptwatch dashboard URL and paste it below.</p>
+          <div class="row">
+            <select id="adoptProject" class="input"></select>
+            <textarea id="adoptIds" class="input grow" rows="3" placeholder="6ba7b818-9dad-11d1-80b4-00c04fd430c8&#10;6ba7b819-9dad-11d1-80b4-00c04fd430c8"></textarea>
+          </div>
+          <div class="row end">
+            <span id="adoptResult" class="muted small"></span>
+            <span class="spacer"></span>
+            <button id="adoptCancel" class="btn">Cancel</button>
+            <button id="adoptSave" class="btn primary">Add monitors</button>
+          </div>
+        </div>
+
+        <div id="bulkBar" class="toolbar bulkbar hidden">
+          <span id="selectedCount" class="pill">0 selected</span>
+          <span class="spacer"></span>
+          <button id="bulkActivate" class="btn">Activate</button>
+          <button id="bulkDeactivate" class="btn">Deactivate</button>
+          <button id="bulkSchedule" class="btn primary">Add time block</button>
+          <button id="bulkClearSchedule" class="btn danger solid">Clear schedules</button>
+        </div>
+
+        <div id="monitorList" class="list"></div>
+        <p id="emptyMonitors" class="empty hidden">No monitors match here.</p>
       </div>
-      <p class="muted">All schedule times are evaluated in this timezone. Turning automation off
-        leaves monitors exactly as they are.</p>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>API usage per hour <span class="muted small">(last 24 h)</span></h2>
-      <div class="usage-head">
-        <div><b id="uLastHour">0</b><span class="muted small">calls this hour</span></div>
-        <div><b id="u24">0</b><span class="muted small">calls / 24 h</span></div>
-        <div><b id="uErr">0</b><span class="muted small">failed calls</span></div>
-      </div>
-      <div id="usageChart" class="chart"></div>
-      <table class="endpoints"><tbody id="endpointRows"></tbody></table>
-    </div>
-
-    <div class="card">
-      <h2>Account</h2>
-      <p class="muted small">Change the password for the account you're logged in as. Nobody else
-        — including this app's operator — can see it.</p>
-      <div class="row wrap">
-        <input id="curPassword" class="input" type="password" placeholder="Current password" autocomplete="current-password">
-        <input id="newPassword" class="input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password">
-        <input id="newPassword2" class="input" type="password" placeholder="Confirm new password" autocomplete="new-password">
-        <button id="changePasswordBtn" class="btn primary">Change password</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- TEAM -->
-  <section id="tab-team" class="panel hidden">
-    <div class="card">
-      <h2>Invite a team member</h2>
-      <p class="muted small">Only <code>@contentninja.in</code> addresses can be invited. You set
-        their password and role directly — no email is sent.</p>
-      <div class="row wrap">
-        <input id="inviteEmail" class="input" type="email" placeholder="name@contentninja.in">
-        <select id="inviteRole" class="input">
-          <option value="viewer">Viewer</option>
-          <option value="editor">Editor</option>
-          <option value="admin">Admin</option>
-          <option value="super-admin">Super admin</option>
+    <!-- LOGS -->
+    <section id="tab-logs" class="panel hidden">
+      <div class="toolbar">
+        <select id="logLevel" class="input">
+          <option value="">All levels</option>
+          <option value="success">Success</option>
+          <option value="info">Info</option>
+          <option value="warn">Warning</option>
+          <option value="error">Error</option>
         </select>
-        <input id="invitePassword" class="input" type="password" placeholder="Password (min 8 chars)">
-        <button id="inviteBtn" class="btn primary">Invite</button>
+        <input id="logSearch" class="input" type="search" placeholder="Filter log text…">
+        <span class="spacer"></span>
+        <label class="check"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
       </div>
-      <p id="inviteError" class="hint"></p>
-    </div>
-    <div class="card">
-      <h2>Team members</h2>
-      <div id="teamList" class="list"></div>
-    </div>
-  </section>
-</main>
+      <div class="logs">
+        <div class="logrow loghead">
+          <span class="t">Time</span>
+          <span class="lv">Level</span>
+          <span class="user">User</span>
+          <span class="msg">Message</span>
+        </div>
+        <div id="logList"></div>
+      </div>
+    </section>
 
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="panel hidden">
+      <div class="card">
+        <h2>API key</h2>
+        <p class="muted">Stored server-side and never sent back to this page — you'll only ever see a
+          masked version. Use an <b>organization-level</b> key so projects can be listed.</p>
+        <div class="row">
+          <input id="apiKey" class="input grow" type="password" placeholder="Paste your Promptwatch API key" autocomplete="off">
+          <button id="saveKey" class="btn primary">Save &amp; sync</button>
+          <button id="testKey" class="btn">Test</button>
+          <button id="clearKey" class="btn danger">Remove</button>
+        </div>
+        <p id="keyState" class="muted"></p>
+      </div>
+
+      <div class="card">
+        <h2>Scheduler</h2>
+        <div class="row wrap">
+          <label class="field">Timezone
+            <input id="timezone" class="input" list="tzlist" placeholder="e.g. Asia/Kolkata">
+            <datalist id="tzlist"></datalist>
+          </label>
+          <label class="field">Check interval (seconds)
+            <input id="tickSeconds" class="input" type="number" min="10" step="10">
+          </label>
+          <label class="field">Automation
+            <label class="switch"><input type="checkbox" id="schedulerEnabled"><span></span></label>
+          </label>
+          <button id="saveScheduler" class="btn primary">Save</button>
+        </div>
+        <p class="muted">All schedule times are evaluated in this timezone. Turning automation off
+          leaves monitors exactly as they are.</p>
+      </div>
+
+      <div class="card">
+        <h2>API usage per hour <span class="muted small">(last 24 h)</span></h2>
+        <div class="usage-head">
+          <div><b id="uLastHour">0</b><span class="muted small">calls this hour</span></div>
+          <div><b id="u24">0</b><span class="muted small">calls / 24 h</span></div>
+          <div><b id="uErr">0</b><span class="muted small">failed calls</span></div>
+        </div>
+        <div id="usageChart" class="chart"></div>
+        <div id="usageAxis" class="chart-axis"></div>
+        <table class="endpoints"><tbody id="endpointRows"></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2>Account</h2>
+        <p class="muted small">Change the password for the account you're logged in as. Nobody else
+          — including this app's operator — can see it.</p>
+        <div class="row wrap">
+          <input id="curPassword" class="input" type="password" placeholder="Current password" autocomplete="current-password">
+          <input id="newPassword" class="input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password">
+          <input id="newPassword2" class="input" type="password" placeholder="Confirm new password" autocomplete="new-password">
+          <button id="changePasswordBtn" class="btn primary">Change password</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section id="tab-team" class="panel hidden">
+      <div class="card">
+        <h2>Invite a team member</h2>
+        <p class="muted small">Only <code>@contentninja.in</code> addresses can be invited. You set
+          their password and role directly — no email is sent.</p>
+        <div class="row wrap">
+          <input id="inviteEmail" class="input" type="email" placeholder="name@contentninja.in">
+          <select id="inviteRole" class="input">
+            <option value="viewer">Viewer</option>
+            <option value="editor">Editor</option>
+            <option value="admin">Admin</option>
+            <option value="super-admin">Super admin</option>
+          </select>
+          <input id="invitePassword" class="input" type="password" placeholder="Password (min 8 chars)">
+          <button id="inviteBtn" class="btn primary">Invite</button>
+        </div>
+        <p id="inviteError" class="hint"></p>
+      </div>
+      <div class="card">
+        <h2>Team members</h2>
+        <div id="teamList" class="list"></div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="rightrail">
+    <div class="profile-card">
+      <div class="avatar" id="avatarInitial"></div>
+      <div class="who" id="whoami"></div>
+      <div class="role-tag" id="whoRole"></div>
+    </div>
+    <div class="mini-card">
+      <h3>Automation</h3>
+      <div id="rightAutomation" class="muted small"></div>
+    </div>
+    <div class="mini-card">
+      <h3>This week</h3>
+      <div id="rightStats"></div>
+    </div>
+  </aside>
+
+</div><!-- /shell -->
 </div><!-- /appShell -->
 
 <div id="toast" class="toast hidden"></div>
 
-<!-- Schedule editor -->
+<!-- Schedule editor: manage a monitor's (or bulk selection's) time blocks.
+     Structure mirrors the time-block-scheduler reference: a start day+time
+     and end day+time form (not a day-of-week checkbox picker), a live
+     preview/duration, and a table of the blocks that exist so far. -->
 <div id="modal" class="modal hidden">
-  <div class="modal-box">
+  <div class="modal-box wide">
     <h2 id="modalTitle">Schedule</h2>
     <p id="modalSub" class="muted small"></p>
-    <label class="switch-row">
-      <label class="switch"><input type="checkbox" id="schEnabled"><span></span></label>
-      <span>Automate this monitor</span>
-    </label>
-    <div class="field-label">Days the window opens</div>
-    <div id="dayPicker" class="days"></div>
-    <div class="row">
-      <label class="field">Active from
-        <input id="schStart" class="input" type="time" value="09:00"></label>
-      <label class="field">until
-        <input id="schEnd" class="input" type="time" value="17:00"></label>
+
+    <div class="block-form">
+      <div class="section-label">New time block</div>
+      <div class="block-grid">
+        <label class="field">Start day
+          <select id="blockStartDay" class="input"></select>
+        </label>
+        <label class="field">Start time
+          <input id="schStart" class="input" type="time" value="09:00">
+        </label>
+        <div class="arrow">→</div>
+        <label class="field">End day
+          <select id="blockEndDay" class="input"></select>
+        </label>
+        <label class="field">End time
+          <input id="schEnd" class="input" type="time" value="17:00">
+        </label>
+        <button id="blockSave" class="btn primary">Add block</button>
+      </div>
+      <p class="hint">Blocks may span multiple days. A block sends <b>ON</b> when it starts and
+        <b>OFF</b> when it ends — blocks on the same monitor must not overlap or touch each other.</p>
+      <p id="blockError" class="hint err-text"></p>
+      <div id="blockPreview" class="block-preview hidden"></div>
     </div>
-    <p id="windowHint" class="hint"></p>
-    <div class="row end">
-      <button id="schDelete" class="btn danger">Remove schedule</button>
+
+    <div id="blockTableSection">
+      <div class="schedule-head">
+        <div class="section-label">Scheduled blocks</div>
+        <span id="blockCount" class="muted small">0 blocks</span>
+      </div>
+      <div id="blockTableWrap"></div>
+    </div>
+
+    <div class="row end" id="modalFooter">
+      <button id="schDeleteAll" class="btn danger">Remove all blocks</button>
       <span class="spacer"></span>
-      <button id="schCancel" class="btn">Cancel</button>
-      <button id="schSave" class="btn primary">Save schedule</button>
+      <button id="schCancel" class="btn">Close</button>
     </div>
   </div>
 </div>

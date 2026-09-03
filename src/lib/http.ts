@@ -28,23 +28,37 @@ export class ValidationError extends Error {
 
 const VALID_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-export interface CleanSchedule {
-  enabled: boolean;
-  days: number[];
+export interface CleanBlock {
+  startDay: number;
   startTime: string;
+  endDay: number;
   endTime: string;
 }
 
-export function cleanSchedule(payload: Record<string, unknown>): CleanSchedule {
-  const rawDays = Array.isArray(payload.days) ? (payload.days as unknown[]) : [];
-  const days = [...new Set(rawDays.map((d) => Number(d)).filter((d) => d >= 0 && d <= 6))].sort((a, b) => a - b);
-  const start = (payload.startTime as string) || "09:00";
-  const end = (payload.endTime as string) || "17:00";
-  if (!VALID_TIME.test(start) || !VALID_TIME.test(end)) {
+function cleanDay(value: unknown, label: string): number {
+  const day = Number(value);
+  if (!Number.isInteger(day) || day < 0 || day > 6) throw new ValidationError(`Invalid ${label} day.`);
+  return day;
+}
+
+/** A block is a single (startDay,startTime) → (endDay,endTime) window — same
+ * model as the reference time block scheduler: the end must be strictly
+ * later than the start (no wrapping past the end of the week). */
+export function cleanBlock(payload: Record<string, unknown>): CleanBlock {
+  const startDay = cleanDay(payload.startDay, "start");
+  const endDay = cleanDay(payload.endDay, "end");
+  const startTime = (payload.startTime as string) || "09:00";
+  const endTime = (payload.endTime as string) || "17:00";
+  if (!VALID_TIME.test(startTime) || !VALID_TIME.test(endTime)) {
     throw new ValidationError("Times must be in 24-hour HH:MM format.");
   }
-  if (payload.enabled && !days.length) {
-    throw new ValidationError("Pick at least one day.");
+  if (endDay * 24 * 60 + timeToMinutes(endTime) <= startDay * 24 * 60 + timeToMinutes(startTime)) {
+    throw new ValidationError("The end of the block must be later than its start.");
   }
-  return { enabled: Boolean(payload.enabled), days, startTime: start, endTime: end };
+  return { startDay, startTime, endDay, endTime };
+}
+
+function timeToMinutes(value: string): number {
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
 }

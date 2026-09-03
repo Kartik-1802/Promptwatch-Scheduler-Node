@@ -9,13 +9,16 @@ const el = (tag, cls, text) => {
 
 let state = null;
 let session = null; // { email, role } | null
-let editing = null; // { monitorIds:[...], days:Set }
+let activeProjectId = null; // null = folder grid, "__all__" = every monitor, or a real project id
+let editing = null; // { mode: 'single', monitorId } | { mode: 'bulk', monitorIds: [...] }
 const selected = new Set();
 
 const MUTATE_ROLES = new Set(["editor", "admin", "super-admin"]);
 const SETTINGS_ROLES = new Set(["admin", "super-admin"]);
+const TEAM_ROLES = new Set(["admin", "super-admin"]);
 const canMutate = () => session && MUTATE_ROLES.has(session.role);
 const canSettings = () => session && SETTINGS_ROLES.has(session.role);
+const canManageTeam = () => session && TEAM_ROLES.has(session.role);
 const isSuperAdmin = () => session && session.role === "super-admin";
 
 // ---------- transport ----------
@@ -40,61 +43,135 @@ function toast(message, kind = "ok") {
   toastTimer = setTimeout(() => node.classList.add("hidden"), 3500);
 }
 
-// ---------- rendering ----------
+// ---------- rendering helpers ----------
 function fmtTime(ts) {
   if (!ts) return "never";
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function describeSchedule(schedule) {
-  if (!schedule) return null;
-  const days = schedule.days.length === 7
-    ? "every day"
-    : schedule.days.map((d) => DAYS[d]).join(", ") || "no days";
-  return `${schedule.startTime}–${schedule.endTime} · ${days}`;
+function describeBlock(block) {
+  return `${DAYS[block.startDay]} ${block.startTime} → ${DAYS[block.endDay]} ${block.endTime}`;
+}
+
+function monitorsInScope(projectId) {
+  if (!state) return [];
+  if (projectId === "__all__" || !projectId) return state.monitors;
+  return state.monitors.filter((m) => m.projectId === projectId);
 }
 
 function renderStats() {
-  const monitors = state.monitors;
-  const scheduled = monitors.filter((m) => m.schedule && m.schedule.enabled);
+  const monitors = monitorsInScope(activeProjectId);
+  const scheduled = monitors.filter((m) => m.blocks.length > 0);
   const drift = monitors.filter((m) => m.desiredActive !== null && m.desiredActive !== m.active);
-  const cards = [
-    [monitors.filter((m) => m.active).length, "Active now"],
-    [monitors.filter((m) => !m.active).length, "Inactive"],
-    [monitors.length, "Monitors synced"],
-    [scheduled.length, "On a schedule"],
-    [state.projects.length, "Projects"],
-    [drift.length, "Pending changes"],
-  ];
-  $("#stats").innerHTML = "";
-  cards.forEach(([value, label]) => {
-    const card = el("div", "stat");
-    card.append(el("b", null, String(value)), el("span", null, label));
-    $("#stats").append(card);
+  const activeCount = monitors.filter((m) => m.active).length;
+
+  // One primary metric (active/total already implies "inactive") plus a
+  // compact secondary row, instead of several same-weight cards that
+  // partly restate each other.
+  const primary = $("#statPrimary");
+  primary.innerHTML = "";
+  primary.append(el("b", null, `${activeCount}/${monitors.length}`), el("span", null, "monitors active"));
+
+  const secondary = $("#statSecondary");
+  secondary.innerHTML = "";
+  [
+    [scheduled.length, "on a schedule"],
+    [state.projects.length, "projects"],
+    [drift.length, "pending changes"],
+  ].forEach(([value, label]) => {
+    const chip = el("div", "stat-chip");
+    chip.append(el("b", null, String(value)), el("span", null, label));
+    secondary.append(chip);
   });
 }
 
+// ---------- folder view ----------
+function renderFolders() {
+  const grid = $("#folderGrid");
+  const term = $("#folderSearch").value.trim().toLowerCase();
+  grid.innerHTML = "";
+
+  const byProject = new Map();
+  state.monitors.forEach((m) => {
+    if (!byProject.has(m.projectId)) byProject.set(m.projectId, []);
+    byProject.get(m.projectId).push(m);
+  });
+
+  const visibleProjects = state.projects.filter((p) => !term || p.name.toLowerCase().includes(term));
+  $("#emptyFolders").classList.toggle("hidden", state.projects.length > 0);
+
+  if (!term) {
+    const allCard = el("div", "folder-card call");
+    allCard.append(el("div", "ficon", "▦"));
+    allCard.append(el("div", "fname", "All projects"));
+    allCard.append(el("div", "fmeta", `${state.monitors.length} monitor(s) total`));
+    const counts = el("div", "fcounts");
+    counts.append(el("span", "fchip", `${state.monitors.filter((m) => m.active).length} active`));
+    allCard.append(counts);
+    allCard.onclick = () => openProject("__all__");
+    grid.append(allCard);
+  }
+
+  visibleProjects.forEach((p) => {
+    const monitors = byProject.get(p.id) || [];
+    const card = el("div", "folder-card");
+    card.append(el("div", "ficon", "📁"));
+    card.append(el("div", "fname", p.name));
+    card.append(el("div", "fmeta", monitors.length === 1 ? "1 monitor" : `${monitors.length} monitors`));
+    const counts = el("div", "fcounts");
+    counts.append(el("span", "fchip", `${monitors.filter((m) => m.active).length} active`));
+    counts.append(el("span", "fchip", `${monitors.filter((m) => m.blocks.length > 0).length} scheduled`));
+    card.append(counts);
+    card.onclick = () => openProject(p.id);
+    grid.append(card);
+  });
+}
+
+function openProject(id) {
+  activeProjectId = id;
+  selected.clear();
+  $("#folderView").classList.add("hidden");
+  $("#projectView").classList.remove("hidden");
+  const project = state.projects.find((p) => p.id === id);
+  $("#projectViewTitle").textContent = id === "__all__" ? "All monitors" : (project ? project.name : "Monitors");
+  $("#projectViewIcon").textContent = id === "__all__" ? "▦" : "📁";
+  $("#pageTitle").textContent = id === "__all__" ? "All monitors" : (project ? project.name : "Monitors");
+  $("#pageSub").textContent = "Schedule, activate, or bulk-manage the monitors below.";
+  renderStats();
+  renderMonitors();
+}
+
+function backToFolders() {
+  activeProjectId = null;
+  selected.clear();
+  $("#projectView").classList.add("hidden");
+  $("#folderView").classList.remove("hidden");
+  $("#pageTitle").textContent = "Projects";
+  $("#pageSub").textContent = "Pick a project to see its monitors, or manage everything at once.";
+  renderStats();
+  renderFolders();
+}
+
 function renderMonitors() {
+  if (activeProjectId === null) return; // folder grid is shown instead
   const list = $("#monitorList");
   const term = $("#search").value.trim().toLowerCase();
-  const project = $("#projectFilter").value;
   const onlyScheduled = $("#scheduledOnly").checked;
   const onlyInactive = $("#inactiveOnly").checked;
 
-  // Drop selections for monitors no longer in the synced set.
-  const liveIds = new Set(state.monitors.map((m) => m.id));
+  const scope = monitorsInScope(activeProjectId);
+  const liveIds = new Set(scope.map((m) => m.id));
   [...selected].forEach((id) => { if (!liveIds.has(id)) selected.delete(id); });
 
-  const rows = state.monitors.filter((m) => {
-    if (project && m.projectId !== project) return false;
-    if (onlyScheduled && !m.schedule) return false;
+  const rows = scope.filter((m) => {
+    if (onlyScheduled && !m.blocks.length) return false;
     if (onlyInactive && m.active) return false;
     if (!term) return true;
     return `${m.name} ${m.projectName}`.toLowerCase().includes(term);
   });
 
   list.innerHTML = "";
-  $("#emptyMonitors").classList.toggle("hidden", state.monitors.length > 0);
+  $("#emptyMonitors").classList.toggle("hidden", rows.length > 0);
   renderBulkBar(rows);
 
   rows.forEach((m) => {
@@ -114,10 +191,8 @@ function renderMonitors() {
     const name = el("div", "name");
     name.append(el("span", null, m.name));
     name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Inactive"));
-    if (m.schedule && m.schedule.enabled) {
+    if (m.blocks.length) {
       name.append(el("span", "badge auto", m.inWindow ? "In window" : "Outside window"));
-    } else if (m.schedule) {
-      name.append(el("span", "badge", "Schedule paused"));
     }
     if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
     lead.append(name);
@@ -128,13 +203,12 @@ function renderMonitors() {
     row.append(lead);
 
     const sched = el("div", "sched");
-    if (m.schedule) {
-      const line = el("div");
-      line.append(el("b", null, describeSchedule(m.schedule)));
-      sched.append(line);
+    if (m.blocks.length) {
+      m.blocks.slice(0, 2).forEach((b) => sched.append(el("div", null, describeBlock(b))));
+      if (m.blocks.length > 2) sched.append(el("div", "muted", `+${m.blocks.length - 2} more block(s)`));
       if (m.nextTransition) {
         const when = new Date(m.nextTransition.at);
-        sched.append(el("div", null,
+        sched.append(el("div", "muted",
           `Next: ${m.nextTransition.to} at ${when.toLocaleString([], {
             weekday: "short", hour: "2-digit", minute: "2-digit" })}`));
       }
@@ -156,7 +230,7 @@ function renderMonitors() {
       } catch (err) { toast(err.message, "err"); }
       finally { toggle.disabled = !canMutate(); }
     };
-    const edit = el("button", "btn primary", m.schedule ? "Edit schedule" : "Schedule");
+    const edit = el("button", "btn primary", m.blocks.length ? "Manage schedule" : "Schedule");
     edit.disabled = !canMutate();
     edit.onclick = () => openEditor(m);
     actions.append(toggle, edit);
@@ -180,27 +254,34 @@ function renderBulkBar(visibleRows) {
   };
 }
 
-function renderProjectFilter() {
-  const select = $("#projectFilter");
-  const current = select.value;
-  select.innerHTML = '<option value="">All projects</option>';
-  state.projects.forEach((p) => {
-    const option = el("option", null, p.name);
-    option.value = p.id;
-    select.append(option);
-  });
-  select.value = current;
-}
-
 function renderTop() {
-  const now = new Date(state.serverNow);
-  $("#clock").textContent = `${state.settings.timezone} · ${now.toLocaleTimeString([], {
-    hour: "2-digit", minute: "2-digit" })}`;
   const on = state.settings.schedulerEnabled && state.settings.hasApiKey;
-  $("#tickState").textContent = on
+  const label = on
     ? `Automation on · last check ${fmtTime(state.lastTickAt)}`
     : (state.settings.hasApiKey ? "Automation paused" : "No API key");
-  document.querySelector(".dot").classList.toggle("off", !on);
+  $("#tickLabel").textContent = label;
+  $("#tickState .dot").classList.toggle("off", !on);
+  $("#rightAutomation").textContent = label;
+}
+
+function renderRightRail() {
+  if (!session) return;
+  $("#avatarInitial").textContent = session.email.slice(0, 1).toUpperCase();
+  $("#whoami").textContent = session.email;
+  $("#whoRole").textContent = session.role;
+  const monitors = state.monitors;
+  const wrap = $("#rightStats");
+  wrap.innerHTML = "";
+  const rows = [
+    [`${monitors.filter((m) => m.active).length}/${monitors.length}`, "monitors active"],
+    [monitors.filter((m) => m.blocks.length > 0).length, "on a schedule"],
+    [state.projects.length, "projects synced"],
+  ];
+  rows.forEach(([value, label]) => {
+    const row = el("div", "small muted");
+    row.innerHTML = `<b style="color:var(--ink)">${value}</b> ${label}`;
+    wrap.append(row);
+  });
 }
 
 function renderSettings() {
@@ -216,10 +297,10 @@ function renderSettings() {
 function apply(next) {
   state = next;
   renderTop();
+  if (activeProjectId === null) renderFolders(); else renderMonitors();
   renderStats();
-  renderProjectFilter();
-  renderMonitors();
   renderSettings();
+  renderRightRail();
   applyRoleUI();
 }
 
@@ -231,8 +312,8 @@ const SETTINGS_INPUT_IDS = ["apiKey", "saveKey", "testKey", "clearKey",
 function applyRoleUI() {
   MUTATE_BUTTON_IDS.forEach((id) => { const e = $(`#${id}`); if (e) e.disabled = !canMutate(); });
   SETTINGS_INPUT_IDS.forEach((id) => { const e = $(`#${id}`); if (e) e.disabled = !canSettings(); });
-  $("#teamTabBtn").classList.toggle("hidden", !isSuperAdmin());
-  $("#whoami").textContent = session ? `${session.email} · ${session.role}` : "";
+  $("#teamTabBtn").classList.toggle("hidden", !canManageTeam());
+  $("#whoami").textContent = session ? session.email : "";
 }
 
 // ---------- usage + logs ----------
@@ -244,8 +325,14 @@ async function loadUsage() {
 
   const peak = Math.max(1, ...usage.series.map((b) => b.total));
   const chart = $("#usageChart");
+  const axis = $("#usageAxis");
   chart.innerHTML = "";
-  usage.series.forEach((bucket) => {
+  axis.innerHTML = "";
+  // 24 hourly buckets is too many labels to show at once, so only every
+  // 3rd hour gets one — the bars themselves stay one-per-hour, and hovering
+  // any bar still shows its exact hour, count, and failures via the tooltip.
+  const labelEvery = 3;
+  usage.series.forEach((bucket, i) => {
     const label = new Date(bucket.hour * 1000).toLocaleTimeString([], { hour: "2-digit" });
     const bar = el("div", "bar");
     bar.title = `${label} — ${bucket.total} calls, ${bucket.errors} failed, avg ${bucket.avgMs}ms`;
@@ -255,6 +342,7 @@ async function loadUsage() {
     bad.style.height = `${(bucket.errors / peak) * 100}%`;
     bar.append(bad, ok);
     chart.append(bar);
+    axis.append(el("span", null, i % labelEvery === 0 ? label : ""));
   });
 
   $("#endpointRows").innerHTML = "";
@@ -288,18 +376,75 @@ async function loadLogs() {
   });
 }
 
-// ---------- schedule editor ----------
+// ---------- schedule editor (multiple time blocks per monitor) ----------
+// Structure/logic ported from the time-block-scheduler reference: a block is
+// a single (startDay,startTime) -> (endDay,endTime) range, not a set of
+// repeated weekdays. Days are 0=Mon..6=Sun to match this app's convention
+// (the reference used 1-7); everything else — minute math, the "end must be
+// later than start" rule, the live preview, the blocks table — mirrors it.
+function currentMonitor(id) {
+  return state.monitors.find((m) => m.id === id) || null;
+}
+
+function blockMinutes(day, time) {
+  const [h, m] = time.split(":").map(Number);
+  return day * 1440 + h * 60 + m;
+}
+
+function durationText(startMin, endMin) {
+  let diff = endMin - startMin;
+  const daysCount = Math.floor(diff / 1440);
+  diff %= 1440;
+  const hours = Math.floor(diff / 60);
+  const mins = diff % 60;
+  const parts = [];
+  if (daysCount) parts.push(`${daysCount}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (mins) parts.push(`${mins}m`);
+  return parts.length ? parts.join(" ") : "0m";
+}
+
+function populateBlockDaySelects() {
+  const options = DAYS.map((label, i) => `<option value="${i}">${label}</option>`).join("");
+  $("#blockStartDay").innerHTML = options;
+  $("#blockEndDay").innerHTML = options;
+  $("#blockStartDay").value = "0";
+  $("#blockEndDay").value = "0";
+}
+
+function resetBlockForm() {
+  populateBlockDaySelects();
+  $("#schStart").value = "09:00";
+  $("#schEnd").value = "17:00";
+  $("#blockError").textContent = "";
+  $("#blockPreview").classList.add("hidden");
+}
+
+function updateBlockPreview() {
+  $("#blockError").textContent = "";
+  const startDay = Number($("#blockStartDay").value), endDay = Number($("#blockEndDay").value);
+  const startTime = $("#schStart").value, endTime = $("#schEnd").value;
+  if (!startTime || !endTime) return;
+  const start = blockMinutes(startDay, startTime), end = blockMinutes(endDay, endTime);
+  const preview = $("#blockPreview");
+  if (end <= start) {
+    preview.classList.add("hidden");
+    return;
+  }
+  preview.innerHTML = `<b>Block:</b> ${DAYS[startDay]} ${startTime} → ${DAYS[endDay]} ${endTime}
+    &nbsp;·&nbsp; Duration: <b>${durationText(start, end)}</b>
+    &nbsp;·&nbsp; Start = <b>ON</b>, End = <b>OFF</b>`;
+  preview.classList.remove("hidden");
+}
+
 function openEditor(monitor) {
-  const schedule = monitor.schedule || { enabled: true, days: [0, 1, 2, 3, 4], startTime: "09:00", endTime: "17:00" };
-  editing = { monitorIds: [monitor.id], days: new Set(schedule.days) };
+  editing = { mode: "single", monitorId: monitor.id };
   $("#modalTitle").textContent = monitor.name;
-  $("#modalSub").textContent = `${monitor.projectName} · currently ${monitor.active ? "active" : "inactive"}`;
-  $("#schEnabled").checked = schedule.enabled;
-  $("#schStart").value = schedule.startTime;
-  $("#schEnd").value = schedule.endTime;
-  $("#schDelete").classList.toggle("hidden", !monitor.schedule);
-  renderDays();
-  updateHint();
+  $("#modalSub").textContent = `${monitor.projectName} · currently ${monitor.active ? "active" : "inactive"}. Blocks on this monitor can't overlap or touch each other.`;
+  $("#blockTableSection").classList.remove("hidden");
+  $("#schDeleteAll").classList.toggle("hidden", monitor.blocks.length === 0);
+  resetBlockForm();
+  renderBlockTable();
   $("#modal").classList.remove("hidden");
 }
 
@@ -307,71 +452,107 @@ function openBulkEditor() {
   if (!selected.size) return toast("Select at least one monitor first", "err");
   const ids = [...selected];
   const monitors = state.monitors.filter((m) => ids.includes(m.id));
-  editing = { monitorIds: ids, days: new Set([0, 1, 2, 3, 4]) };
+  editing = { mode: "bulk", monitorIds: ids };
   $("#modalTitle").textContent = `${ids.length} monitors selected`;
   const projects = new Set(monitors.map((m) => m.projectName));
-  $("#modalSub").textContent = projects.size === 1
-    ? `All in ${[...projects][0]} · this replaces each monitor's existing schedule`
-    : `Across ${projects.size} projects · this replaces each monitor's existing schedule`;
-  $("#schEnabled").checked = true;
-  $("#schStart").value = "09:00";
-  $("#schEnd").value = "17:00";
-  $("#schDelete").classList.add("hidden");
-  renderDays();
-  updateHint();
+  $("#modalSub").textContent = (projects.size === 1
+    ? `All in ${[...projects][0]}. `
+    : `Across ${projects.size} projects. `)
+    + "Adds one new time block to each — any monitor where it would overlap an existing block is skipped.";
+  $("#blockTableSection").classList.add("hidden");
+  $("#schDeleteAll").classList.add("hidden");
+  resetBlockForm();
   $("#modal").classList.remove("hidden");
 }
 
-function renderDays() {
-  const picker = $("#dayPicker");
-  picker.innerHTML = "";
-  DAYS.forEach((label, index) => {
-    const button = el("div", `day${editing.days.has(index) ? " sel" : ""}`, label);
-    button.onclick = () => {
-      editing.days.has(index) ? editing.days.delete(index) : editing.days.add(index);
-      renderDays();
-      updateHint();
-    };
-    picker.append(button);
+function renderBlockTable() {
+  const monitor = currentMonitor(editing.monitorId);
+  const blocks = [...monitor.blocks].sort((a, b) => blockMinutes(a.startDay, a.startTime) - blockMinutes(b.startDay, b.startTime));
+  $("#blockCount").textContent = `${blocks.length} block${blocks.length === 1 ? "" : "s"}`;
+  const wrap = $("#blockTableWrap");
+  if (!blocks.length) {
+    wrap.innerHTML = '<div class="block-empty">No time blocks yet — this monitor runs manually.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  const table = el("table", "block-table");
+  table.innerHTML = `<thead><tr><th>Start</th><th>End</th><th>Duration</th><th>Triggers</th><th></th></tr></thead>`;
+  const tbody = el("tbody");
+  blocks.forEach((block) => {
+    const start = blockMinutes(block.startDay, block.startTime), end = blockMinutes(block.endDay, block.endTime);
+    const tr = el("tr");
+    tr.innerHTML = `
+      <td><b>${DAYS[block.startDay]}</b><br><span class="btime">${block.startTime}</span></td>
+      <td><b>${DAYS[block.endDay]}</b><br><span class="btime">${block.endTime}</span></td>
+      <td class="muted">${durationText(start, end)}</td>
+      <td><span class="status"><span class="bdot"></span>ON → OFF</span></td>`;
+    const rmCell = el("td");
+    rmCell.style.textAlign = "right";
+    const rmBtn = el("button", "iconbtn", "✕");
+    rmBtn.disabled = !canMutate();
+    rmBtn.title = "Remove this block";
+    rmBtn.onclick = () => deleteBlock(block.id);
+    rmCell.append(rmBtn);
+    tr.append(rmCell);
+    tbody.append(tr);
   });
+  table.append(tbody);
+  wrap.append(table);
 }
 
-function updateHint() {
-  const start = $("#schStart").value, end = $("#schEnd").value;
-  const days = [...editing.days].sort().map((d) => DAYS[d]).join(", ") || "no days";
-  if (start === end) {
-    $("#windowHint").textContent = `Active all day on ${days}, inactive otherwise.`;
-  } else if (start > end) {
-    $("#windowHint").textContent =
-      `Activates at ${start} on ${days} and deactivates at ${end} the next morning.`;
-  } else {
-    $("#windowHint").textContent =
-      `Activates at ${start} and deactivates at ${end} on ${days}. Inactive at all other times.`;
+async function addBlock() {
+  $("#blockError").textContent = "";
+  const startDay = Number($("#blockStartDay").value), endDay = Number($("#blockEndDay").value);
+  const startTime = $("#schStart").value, endTime = $("#schEnd").value;
+  const start = blockMinutes(startDay, startTime), end = blockMinutes(endDay, endTime);
+  if (end <= start) {
+    $("#blockError").textContent = "The end of the block must be later than its start. Choose a later day/time.";
+    return;
+  }
+  const body = { startDay, startTime, endDay, endTime };
+  try {
+    if (editing.mode === "bulk") {
+      const res = await api("/api/schedules/bulk", { method: "POST", body: { ...body, monitorIds: editing.monitorIds } });
+      apply(res.state);
+      $("#modal").classList.add("hidden");
+      const skipped = res.skipped.length;
+      toast(skipped
+        ? `Added to ${res.applied} monitor(s), skipped ${skipped} (would overlap)`
+        : `Added to ${res.applied} monitor(s)`, skipped ? "err" : "ok");
+      loadLogs();
+      return;
+    }
+    const res = await api(`/api/schedules/${editing.monitorId}`, { method: "POST", body });
+    apply(res.state);
+    resetBlockForm();
+    renderBlockTable();
+    $("#schDeleteAll").classList.toggle("hidden", currentMonitor(editing.monitorId).blocks.length === 0);
+    toast("Time block added");
+    loadLogs();
+  } catch (err) {
+    if (editing.mode === "bulk") toast(err.message, "err");
+    else $("#blockError").textContent = err.message;
   }
 }
 
-async function saveSchedule() {
-  const body = {
-    enabled: $("#schEnabled").checked,
-    days: [...editing.days],
-    startTime: $("#schStart").value,
-    endTime: $("#schEnd").value,
-  };
-  const bulk = editing.monitorIds.length > 1;
+async function deleteBlock(blockId) {
+  if (!confirm("Remove this time block?")) return;
   try {
-    const res = bulk
-      ? await api("/api/schedules/bulk", { method: "PUT", body: { ...body, monitorIds: editing.monitorIds } })
-      : await api(`/api/schedules/${editing.monitorIds[0]}`, { method: "PUT", body });
+    const res = await api(`/api/schedules/${editing.monitorId}/${blockId}`, { method: "DELETE" });
     apply(res.state);
-    $("#modal").classList.add("hidden");
-    toast(bulk ? `Schedule applied to ${editing.monitorIds.length} monitor(s)` : "Schedule saved and applied");
-    loadLogs();
+    renderBlockTable();
+    $("#schDeleteAll").classList.toggle("hidden", currentMonitor(editing.monitorId).blocks.length === 0);
+    toast("Block removed");
   } catch (err) { toast(err.message, "err"); }
 }
 
 // ---------- team ----------
+function roleOptionsFor(actorRole) {
+  return actorRole === "super-admin" ? ["viewer", "editor", "admin", "super-admin"] : ["viewer", "editor", "admin"];
+}
+
 async function loadTeam() {
-  if (!isSuperAdmin()) return;
+  if (!canManageTeam()) return;
   const { users } = await api("/api/users");
   const list = $("#teamList");
   list.innerHTML = "";
@@ -384,15 +565,18 @@ async function loadTeam() {
     emailLine.append(el("span", `role ${u.role}`, u.role));
     if (!u.active) emailLine.append(el("span", "badge off", "Deactivated"));
     lead.append(emailLine);
-    const created = u.createdAt ? new Date(u.createdAt * 1000).toLocaleDateString() : "—";
+    // createdAt/lastLoginAt come from src/lib/auth.ts's publicUser() as ISO
+    // strings (unlike the epoch-seconds timestamps used elsewhere in this
+    // app) — Date must be given the string directly, not string*1000.
+    const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
     const lastLogin = u.lastLoginAt
-      ? new Date(u.lastLoginAt * 1000).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      ? new Date(u.lastLoginAt).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })
       : "never";
     lead.append(el("div", "meta", `Added ${created} · Last login ${lastLogin}`));
     row.append(lead);
 
     const roleSelect = el("select", "input");
-    ["viewer", "editor", "admin", "super-admin"].forEach((r) => {
+    roleOptionsFor(session.role).forEach((r) => {
       const opt = el("option", null, r);
       opt.value = r;
       if (r === u.role) opt.selected = true;
@@ -443,6 +627,21 @@ async function loadTeam() {
     row.append(actions);
     list.append(row);
   });
+}
+
+function renderInviteRoleOptions() {
+  const select = $("#inviteRole");
+  const current = select.value;
+  select.innerHTML = "";
+  // Role text is shown as the raw value (e.g. "super-admin") everywhere in
+  // this app — the badge and the per-member role <select> both do this — so
+  // match that here instead of title-casing, which was the inconsistency.
+  roleOptionsFor(session ? session.role : "admin").forEach((r) => {
+    const opt = el("option", null, r);
+    opt.value = r;
+    select.append(opt);
+  });
+  if ([...select.options].some((o) => o.value === current)) select.value = current;
 }
 
 $("#inviteBtn").onclick = async () => {
@@ -506,34 +705,38 @@ $("#logoutBtn").onclick = async () => {
 };
 
 // ---------- wiring ----------
-document.querySelectorAll(".tab").forEach((tab) => {
+document.querySelectorAll(".side-btn[data-tab]").forEach((tab) => {
   tab.onclick = () => {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".side-btn[data-tab]").forEach((t) => t.classList.remove("active"));
     tab.classList.add("active");
     ["monitors", "logs", "settings", "team"].forEach((name) =>
       $(`#tab-${name}`).classList.toggle("hidden", name !== tab.dataset.tab));
     if (tab.dataset.tab === "logs") loadLogs();
     if (tab.dataset.tab === "settings") loadUsage();
-    if (tab.dataset.tab === "team") loadTeam();
+    if (tab.dataset.tab === "team") { renderInviteRoleOptions(); loadTeam(); }
   };
 });
 
+$("#folderSearch").oninput = renderFolders;
+$("#backToFolders").onclick = backToFolders;
 $("#search").oninput = renderMonitors;
-$("#projectFilter").onchange = renderMonitors;
 $("#scheduledOnly").onchange = renderMonitors;
 $("#inactiveOnly").onchange = renderMonitors;
 $("#logLevel").onchange = loadLogs;
 $("#logSearch").oninput = loadLogs;
-$("#schStart").oninput = updateHint;
-$("#schEnd").oninput = updateHint;
+$("#schStart").oninput = updateBlockPreview;
+$("#schEnd").oninput = updateBlockPreview;
+$("#blockStartDay").onchange = updateBlockPreview;
+$("#blockEndDay").onchange = updateBlockPreview;
 $("#schCancel").onclick = () => $("#modal").classList.add("hidden");
-$("#schSave").onclick = saveSchedule;
-$("#schDelete").onclick = async () => {
+$("#blockSave").onclick = addBlock;
+$("#schDeleteAll").onclick = async () => {
+  if (!confirm("Remove every time block from this monitor?")) return;
   try {
-    const res = await api(`/api/schedules/${editing.monitorIds[0]}`, { method: "DELETE" });
+    const res = await api(`/api/schedules/${editing.monitorId}`, { method: "DELETE" });
     apply(res.state);
     $("#modal").classList.add("hidden");
-    toast("Schedule removed");
+    toast("Schedule cleared");
   } catch (err) { toast(err.message, "err"); }
 };
 
@@ -541,11 +744,11 @@ $("#bulkSchedule").onclick = openBulkEditor;
 
 $("#bulkClearSchedule").onclick = async () => {
   if (!selected.size) return;
-  if (!confirm(`Remove schedules from ${selected.size} monitor(s)?`)) return;
+  if (!confirm(`Remove all schedule blocks from ${selected.size} monitor(s)?`)) return;
   try {
     const res = await api("/api/schedules/bulk", { method: "DELETE", body: { monitorIds: [...selected] } });
     apply(res.state);
-    toast(`Schedules removed from ${selected.size} monitor(s)`);
+    toast(`Schedules cleared for ${selected.size} monitor(s)`);
   } catch (err) { toast(err.message, "err"); }
 };
 
@@ -567,19 +770,21 @@ $("#bulkDeactivate").onclick = () => bulkSetActive(false);
 
 $("#syncBtn").onclick = async () => {
   const button = $("#syncBtn");
-  button.disabled = true; button.textContent = "Syncing…";
+  const label = button.querySelector("span");
+  button.disabled = true; if (label) label.textContent = "Syncing…";
   try {
     const res = await api("/api/sync", { method: "POST" });
     apply(res.state);
     const { projects, monitors, errors } = res.summary;
     toast(`Synced ${projects} project(s), ${monitors} monitor(s)`, errors.length ? "err" : "ok");
   } catch (err) { toast(err.message, "err"); }
-  finally { button.disabled = false; button.textContent = "Sync"; }
+  finally { button.disabled = false; if (label) label.textContent = "Sync"; }
 };
 
 $("#addByIdBtn").onclick = () => {
   const select = $("#adoptProject");
   select.innerHTML = state.projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+  if (activeProjectId && activeProjectId !== "__all__") select.value = activeProjectId;
   $("#adoptRow").classList.toggle("hidden");
 };
 $("#adoptCancel").onclick = () => $("#adoptRow").classList.add("hidden");
@@ -662,7 +867,7 @@ async function initAfterLogin() {
   $("#tzlist").innerHTML = timezones.map((tz) => `<option value="${tz}">`).join("");
   await refresh();
   await loadUsage();
-  if (isSuperAdmin()) loadTeam();
+  if (canManageTeam()) { renderInviteRoleOptions(); loadTeam(); }
 
   if (!pollingStarted) {
     pollingStarted = true;
