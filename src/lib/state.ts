@@ -9,51 +9,62 @@ export async function buildState() {
   const parts = partsAt(new Date(), settings.timezone);
   const minutes = parts.hour * 60 + parts.minute;
 
-  const [projects, monitorsRaw] = await Promise.all([
-    prisma.project.findMany({ orderBy: { name: "asc" } }),
-    prisma.monitor.findMany({
-      include: { scheduleBlocks: { orderBy: { createdAt: "asc" } } },
-      orderBy: [{ projectName: "asc" }, { name: "asc" }],
+  const [projectsRaw, monitorsRaw] = await Promise.all([
+    prisma.project.findMany({
+      include: { scheduleBlocks: { orderBy: [{ startDay: "asc" }, { startTime: "asc" }] } },
+      orderBy: { name: "asc" },
     }),
+    prisma.monitor.findMany({ orderBy: [{ projectName: "asc" }, { name: "asc" }] }),
   ]);
 
-  const monitors = monitorsRaw.map((m) => {
-    const blocks = m.scheduleBlocks.map(toBlockLike);
+  const monitors = monitorsRaw.map((m) => ({
+    id: m.id,
+    projectId: m.projectId,
+    projectName: m.projectName,
+    name: m.name,
+    description: m.description,
+    active: m.active,
+    models: parseStringArray(m.models),
+    languageCode: m.languageCode,
+    countryCode: m.countryCode,
+    promptFrequency: m.promptFrequency,
+    promptCount: m.promptCount,
+    responseCount: m.responseCount,
+    averageVisibility: m.averageVisibility,
+    staleSince: m.staleSince ? m.staleSince.toISOString() : null,
+  }));
+
+  // Each project carries its own schedule plus the live counts the homepage
+  // needs, so every project's state is visible without opening it.
+  const projects = projectsRaw.map((p) => {
+    const blocks = p.scheduleBlocks.map(toBlockLike);
     const desired = evaluate(blocks, parts.weekday, minutes);
+    const own = monitors.filter((m) => m.projectId === p.id);
     return {
-      id: m.id,
-      projectId: m.projectId,
-      projectName: m.projectName,
-      name: m.name,
-      description: m.description,
-      active: m.active,
-      models: parseStringArray(m.models),
-      languageCode: m.languageCode,
-      countryCode: m.countryCode,
-      promptFrequency: m.promptFrequency,
-      promptCount: m.promptCount,
-      responseCount: m.responseCount,
-      averageVisibility: m.averageVisibility,
-      staleSince: m.staleSince ? m.staleSince.toISOString() : null,
-      blocks: m.scheduleBlocks.map((b) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      website: p.website,
+      createdAt: p.createdAt ? p.createdAt.toISOString() : null,
+      blocks: p.scheduleBlocks.map((b) => ({
         id: b.id,
         startDay: b.startDay,
         startTime: b.startTime,
         endDay: b.endDay,
         endTime: b.endTime,
+        trigger: b.trigger,
       })),
       desiredActive: desired,
       inWindow: desired,
       nextTransition: nextTransition(blocks, settings.timezone),
+      monitorCount: own.length,
+      activeCount: own.filter((m) => m.active).length,
     };
   });
 
   return {
     settings: publicSettings(settings),
-    projects: projects.map((p) => ({
-      id: p.id, name: p.name, slug: p.slug, website: p.website,
-      createdAt: p.createdAt ? p.createdAt.toISOString() : null,
-    })),
+    projects,
     monitors,
     lastSyncAt: settings.lastSyncAt ? settings.lastSyncAt.getTime() / 1000 : null,
     lastTickAt: getLastTickAt() ? getLastTickAt()! / 1000 : null,

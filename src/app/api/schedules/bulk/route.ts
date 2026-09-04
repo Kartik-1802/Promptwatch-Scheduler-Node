@@ -6,45 +6,45 @@ import { buildState } from "@/lib/state";
 import { blocksOverlap, describeBlock, tick, toBlockLike } from "@/lib/scheduler";
 import { log } from "@/lib/store";
 
-/** Add the same new block to every selected monitor. Each monitor is checked
- * independently — a monitor whose existing blocks would overlap the new one
- * is skipped (not applied to any of them), the rest still get it. */
+/** Add the same new block to every selected PROJECT. Each project is checked
+ * independently — one whose existing blocks would conflict is skipped (not
+ * applied to any of them), the rest still get it. */
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession(req);
     requireRole(session, MUTATE_ROLES);
     const body = await req.json();
-    const monitorIds: string[] = (body.monitorIds || []).map(String);
-    if (!monitorIds.length) throw new ValidationError("No monitors selected.");
+    const projectIds: string[] = (body.projectIds || []).map(String);
+    if (!projectIds.length) throw new ValidationError("No projects selected.");
 
-    const monitors = await prisma.monitor.findMany({
-      where: { id: { in: monitorIds } },
+    const projects = await prisma.project.findMany({
+      where: { id: { in: projectIds } },
       include: { scheduleBlocks: true },
     });
-    if (monitors.length !== monitorIds.length) {
-      throw new ValidationError(`${monitorIds.length - monitors.length} selected monitor(s) are unknown — run a sync first.`);
+    if (projects.length !== projectIds.length) {
+      throw new ValidationError(`${projectIds.length - projects.length} selected project(s) are unknown — run a sync first.`);
     }
 
     const block = cleanBlock(body);
-    const skipped: Array<{ monitorId: string; name: string; reason: string }> = [];
+    const skipped: Array<{ projectId: string; name: string; reason: string }> = [];
     const applied: string[] = [];
 
-    for (const monitor of monitors) {
-      const conflict = monitor.scheduleBlocks.map(toBlockLike).find((b) => blocksOverlap(b, block));
+    for (const project of projects) {
+      const conflict = project.scheduleBlocks.map(toBlockLike).find((b) => blocksOverlap(b, block));
       if (conflict) {
-        skipped.push({ monitorId: monitor.id, name: monitor.name, reason: `overlaps ${describeBlock(conflict)}` });
+        skipped.push({ projectId: project.id, name: project.name, reason: `overlaps ${describeBlock(conflict)}` });
         continue;
       }
       await prisma.scheduleBlock.create({
-        data: { monitorId: monitor.id, startDay: block.startDay, startTime: block.startTime, endDay: block.endDay, endTime: block.endTime },
+        data: { projectId: project.id, startDay: block.startDay, startTime: block.startTime, endDay: block.endDay, endTime: block.endTime, trigger: block.trigger },
       });
-      applied.push(monitor.id);
+      applied.push(project.id);
     }
 
     if (applied.length) {
       await log(
-        "info", "schedule",
-        `Added block to ${applied.length} monitor(s): ${describeBlock(block)}${skipped.length ? ` (${skipped.length} skipped — overlap)` : ""}`,
+        "info", "schedule.block.added",
+        `Added block to ${applied.length} project(s): ${describeBlock(block)}${skipped.length ? ` (${skipped.length} skipped — overlap)` : ""}`,
         { user: session!.email }
       );
       await tick(true, session!.email);
@@ -55,19 +55,18 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** Clear every block from every selected monitor. */
+/** Clear every block from every selected project. */
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getSession(req);
     requireRole(session, MUTATE_ROLES);
     const body = await req.json();
-    const monitorIds: string[] = (body.monitorIds || []).map(String);
-    if (!monitorIds.length) throw new ValidationError("No monitors selected.");
+    const projectIds: string[] = (body.projectIds || []).map(String);
+    if (!projectIds.length) throw new ValidationError("No projects selected.");
 
-    await prisma.scheduleBlock.deleteMany({ where: { monitorId: { in: monitorIds } } });
-    await log("info", "schedule", `Schedule cleared for ${monitorIds.length} monitor(s)`, { user: session!.email });
-    await tick(true, session!.email);
-    return NextResponse.json({ ok: true, count: monitorIds.length, state: await buildState() });
+    const { count } = await prisma.scheduleBlock.deleteMany({ where: { projectId: { in: projectIds } } });
+    await log("info", "schedule.block.cleared", `Schedule cleared for ${projectIds.length} project(s) — ${count} block(s) removed`, { user: session!.email });
+    return NextResponse.json({ ok: true, count: projectIds.length, state: await buildState() });
   } catch (err) {
     return errorResponse(err);
   }

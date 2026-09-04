@@ -38,16 +38,32 @@ export async function runSync(actor = "System") {
   const errors: string[] = [];
   let monitorCount = 0;
 
-  await prisma.project.deleteMany({});
-  await prisma.project.createMany({
-    data: projects.map((p) => ({
-      id: p.id,
+  // Upsert rather than wipe-and-recreate: schedule blocks hang off Project
+  // with onDelete: Cascade, so deleting projects here would silently destroy
+  // every schedule on every sync.
+  for (const p of projects) {
+    const data = {
       name: p.name,
       slug: p.slug ?? null,
       website: p.website ?? null,
       createdAt: p.createdAt ? new Date(p.createdAt) : null,
-    })),
-  });
+    };
+    await prisma.project.upsert({
+      where: { id: p.id },
+      create: { id: p.id, ...data },
+      update: data,
+    });
+  }
+
+  // Projects that no longer exist upstream do get removed (and their blocks
+  // with them) — but only those, not the whole table.
+  const liveProjectIds = new Set(projects.map((p) => p.id));
+  const staleProjects = await prisma.project.findMany({ select: { id: true } });
+  const goneIds = staleProjects.filter((p) => !liveProjectIds.has(p.id)).map((p) => p.id);
+  if (goneIds.length) {
+    await prisma.project.deleteMany({ where: { id: { in: goneIds } } });
+    await log("warn", "sync", `${goneIds.length} project(s) no longer exist upstream — removed with their schedules`, { user: actor });
+  }
 
   for (const project of projects) {
     let remote: PromptwatchMonitor[] = [];
@@ -141,15 +157,8 @@ export async function runSync(actor = "System") {
     }
   }
 
-  // Drop schedule blocks whose monitor is gone.
-  const liveIds = await prisma.monitor.findMany({ select: { id: true } });
-  const liveIdSet = new Set(liveIds.map((m) => m.id));
-  const orphanedBlocks = await prisma.scheduleBlock.findMany({ select: { monitorId: true } });
-  const toDelete = [...new Set(orphanedBlocks.filter((b) => !liveIdSet.has(b.monitorId)).map((b) => b.monitorId))];
-  if (toDelete.length) {
-    await prisma.scheduleBlock.deleteMany({ where: { monitorId: { in: toDelete } } });
-  }
-
+  // Schedule blocks are cascade-deleted with their project above, so there's
+  // nothing to prune here any more.
   await prisma.settings.update({ where: { id: 1 }, data: { lastSyncAt: new Date() } });
 
   const summary = { projects: projects.length, monitors: monitorCount, errors };

@@ -59,38 +59,57 @@ export class PromptwatchClient {
     if (opts.projectId) headers["X-Project-Id"] = opts.projectId;
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    const started = Date.now();
-    let status = 0;
-    let errorMsg: string | undefined;
+    // A transient network blip (DNS hiccup, connection reset) previously
+    // became a hard failure on the first try, which for the scheduler meant
+    // waiting out the full 5-minute RETRY_BACKOFF_MS before trying again —
+    // "started the schedule, nothing happened for minutes" even though the
+    // network had already recovered. Retry network-level failures and 5xx
+    // (never 4xx — a bad request won't succeed by repeating it) a couple of
+    // times with a short backoff before giving up.
+    const maxAttempts = 3;
+    let lastErr: ApiError | null = null;
 
-    try {
-      const res = await fetch(url.toString(), {
-        method,
-        headers,
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-        signal: controller.signal,
-      });
-      status = res.status;
-      const text = await res.text();
-      const parsed = text ? JSON.parse(text) : null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      const started = Date.now();
+      let status = 0;
+      let errorMsg: string | undefined;
 
-      if (!res.ok) {
-        const code = parsed?.code;
-        errorMsg = parsed?.message || parsed?.error || text.slice(0, 300) || res.statusText;
-        throw new ApiError(status, errorMsg ?? "Unknown error", code);
+      try {
+        const res = await fetch(url.toString(), {
+          method,
+          headers,
+          body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+          signal: controller.signal,
+        });
+        status = res.status;
+        const text = await res.text();
+        const parsed = text ? JSON.parse(text) : null;
+
+        if (!res.ok) {
+          const code = parsed?.code;
+          errorMsg = parsed?.message || parsed?.error || text.slice(0, 300) || res.statusText;
+          throw new ApiError(status, errorMsg ?? "Unknown error", code);
+        }
+        return parsed as T;
+      } catch (err) {
+        const apiErr = err instanceof ApiError
+          ? err
+          : new ApiError(0, `Network error: ${(err as Error).message}`);
+        status = apiErr.status;
+        errorMsg = apiErr.message;
+        lastErr = apiErr;
+
+        const retryable = status === 0 || status >= 500;
+        if (!retryable || attempt === maxAttempts) throw apiErr;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+      } finally {
+        clearTimeout(timeout);
+        await recordApiCall(method, path, status, Date.now() - started, errorMsg);
       }
-      return parsed as T;
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      status = 0;
-      errorMsg = `Network error: ${(err as Error).message}`;
-      throw new ApiError(0, errorMsg);
-    } finally {
-      clearTimeout(timeout);
-      await recordApiCall(method, path, status, Date.now() - started, errorMsg);
     }
+    throw lastErr ?? new ApiError(0, "Unknown error");
   }
 
   async listProjects(): Promise<PromptwatchProject[]> {

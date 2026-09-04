@@ -39,11 +39,12 @@ model Settings {
 }
 
 model Project {
-  id        String    @id
-  name      String
-  slug      String?
-  website   String?
-  createdAt DateTime?
+  id             String          @id
+  name           String
+  slug           String?
+  website        String?
+  createdAt      DateTime?
+  scheduleBlocks ScheduleBlock[]
 }
 
 model Monitor {
@@ -64,27 +65,27 @@ model Monitor {
   seenAt            DateTime?
   nextRetryAt       DateTime?
   staleSince        DateTime?
-  scheduleBlocks    ScheduleBlock[]
 }
 
-// A monitor can have several of these — each is a single (startDay,startTime)
-// to (endDay,endTime) window within the week (0=Mon..6=Sun), sent ON when it
-// opens and OFF when it closes. Blocks belonging to the same monitor may
-// never overlap or touch (enforced in src/lib/scheduler.ts's blocksOverlap,
-// checked by every route that creates or edits a block) so a given moment
-// always maps to at most one block, keeping "should this monitor be on right
-// now" unambiguous.
+// Schedules live on the PROJECT, not the monitor — a project's blocks drive
+// every monitor inside it. Each block is a single (startDay,startTime) to
+// (endDay,endTime) window within the week (0=Mon..6=Sun): ON when it opens,
+// OFF when it closes. Blocks belonging to the same project may never overlap
+// or touch (enforced in src/lib/scheduler.ts's blocksOverlap, checked by
+// every route that creates one) so a given moment always maps to at most one
+// block, keeping "should this project be on right now" unambiguous.
 model ScheduleBlock {
   id        String   @id @default(cuid())
-  monitorId String
-  monitor   Monitor  @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   startDay  Int      // 0=Mon..6=Sun
   startTime String
-  endDay    Int      // 0=Mon..6=Sun
+  endDay    Int      // 0=Mon..6=Sun — may be < startDay: the window wraps past Sunday into Monday
   endTime   String
+  trigger   String   @default("on_off") // "on_off" (ON at start/OFF at end) | "off_on" (inverted)
   createdAt DateTime @default(now())
 
-  @@index([monitorId])
+  @@index([projectId])
 }
 
 model LogEntry {

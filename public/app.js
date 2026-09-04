@@ -9,9 +9,12 @@ const el = (tag, cls, text) => {
 
 let state = null;
 let session = null; // { email, role } | null
-let activeProjectId = null; // null = folder grid, "__all__" = every monitor, or a real project id
-let editing = null; // { mode: 'single', monitorId } | { mode: 'bulk', monitorIds: [...] }
-const selected = new Set();
+let activeProjectId = null; // null = project list (homepage), or the open project's id
+let editing = null; // { projectId } while the schedule modal is open
+let editingBlockId = null; // id of the block currently loaded into the form, or null when adding new
+const selectedMonitors = new Set(); // monitors selected inside an open project
+const selectedProjects = new Set(); // projects selected on the Projects homepage
+const selectedAllMonitors = new Set(); // monitors selected on the flat "Monitors" tab
 
 const MUTATE_ROLES = new Set(["editor", "admin", "super-admin"]);
 const SETTINGS_ROLES = new Set(["admin", "super-admin"]);
@@ -19,7 +22,6 @@ const TEAM_ROLES = new Set(["admin", "super-admin"]);
 const canMutate = () => session && MUTATE_ROLES.has(session.role);
 const canSettings = () => session && SETTINGS_ROLES.has(session.role);
 const canManageTeam = () => session && TEAM_ROLES.has(session.role);
-const isSuperAdmin = () => session && session.role === "super-admin";
 
 // ---------- transport ----------
 async function api(path, options = {}) {
@@ -50,208 +52,350 @@ function fmtTime(ts) {
 }
 
 function describeBlock(block) {
-  return `${DAYS[block.startDay]} ${block.startTime} → ${DAYS[block.endDay]} ${block.endTime}`;
+  const suffix = block.trigger === "off_on" ? " (OFF→ON)" : "";
+  return `${DAYS[block.startDay]} ${block.startTime} → ${DAYS[block.endDay]} ${block.endTime}${suffix}`;
 }
 
 function monitorsInScope(projectId) {
   if (!state) return [];
-  if (projectId === "__all__" || !projectId) return state.monitors;
+  if (!projectId) return state.monitors;
   return state.monitors.filter((m) => m.projectId === projectId);
 }
 
+function currentProject() {
+  return activeProjectId ? state.projects.find((p) => p.id === activeProjectId) || null : null;
+}
+
+/** Icon helper — inline SVG rather than emoji, per the UI/UX rules. */
+function icon(path, cls = "ico") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", path);
+  svg.append(p);
+  return svg;
+}
+const ICON_CHEVRON = "M9.4 18.4 8 17l5-5-5-5 1.4-1.4L15.8 12z";
+const ICON_CLOCK = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3 1-1.7-4-2.1Z";
+const ICON_TRASH = "M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1 12H7L6 9Z";
+
 function renderStats() {
+  const project = currentProject();
   const monitors = monitorsInScope(activeProjectId);
-  const scheduled = monitors.filter((m) => m.blocks.length > 0);
-  const drift = monitors.filter((m) => m.desiredActive !== null && m.desiredActive !== m.active);
   const activeCount = monitors.filter((m) => m.active).length;
 
-  // One primary metric (active/total already implies "inactive") plus a
-  // compact secondary row, instead of several same-weight cards that
-  // partly restate each other.
   const primary = $("#statPrimary");
   primary.innerHTML = "";
-  primary.append(el("b", null, `${activeCount}/${monitors.length}`), el("span", null, "monitors active"));
+  primary.append(el("b", null, `${activeCount}/${monitors.length}`), el("span", null, "monitors on"));
 
   const secondary = $("#statSecondary");
   secondary.innerHTML = "";
-  [
-    [scheduled.length, "on a schedule"],
-    [state.projects.length, "projects"],
-    [drift.length, "pending changes"],
-  ].forEach(([value, label]) => {
+  const chips = project
+    ? [
+        [project.blocks.length, project.blocks.length === 1 ? "time block" : "time blocks"],
+        [project.desiredActive === null ? "Manual" : (project.inWindow ? "In window" : "Outside window"), "right now"],
+      ]
+    : [
+        [state.projects.filter((p) => p.blocks.length > 0).length, "projects scheduled"],
+        [state.projects.length, "projects"],
+      ];
+  chips.forEach(([value, label]) => {
     const chip = el("div", "stat-chip");
     chip.append(el("b", null, String(value)), el("span", null, label));
     secondary.append(chip);
   });
 }
 
-// ---------- folder view ----------
-function renderFolders() {
-  const grid = $("#folderGrid");
-  const term = $("#folderSearch").value.trim().toLowerCase();
-  grid.innerHTML = "";
-
-  const byProject = new Map();
-  state.monitors.forEach((m) => {
-    if (!byProject.has(m.projectId)) byProject.set(m.projectId, []);
-    byProject.get(m.projectId).push(m);
-  });
-
-  const visibleProjects = state.projects.filter((p) => !term || p.name.toLowerCase().includes(term));
-  $("#emptyFolders").classList.toggle("hidden", state.projects.length > 0);
-
-  if (!term) {
-    const allCard = el("div", "folder-card call");
-    allCard.append(el("div", "ficon", "▦"));
-    allCard.append(el("div", "fname", "All projects"));
-    allCard.append(el("div", "fmeta", `${state.monitors.length} monitor(s) total`));
-    const counts = el("div", "fcounts");
-    counts.append(el("span", "fchip", `${state.monitors.filter((m) => m.active).length} active`));
-    allCard.append(counts);
-    allCard.onclick = () => openProject("__all__");
-    grid.append(allCard);
+// ---------- schedule summary (shared by project rows + project header) ----------
+function scheduleSummary(project, { compact = false } = {}) {
+  const wrap = el("div", "sched");
+  if (!project.blocks.length) {
+    wrap.append(el("div", "sched-none", "No schedule — monitors run manually"));
+    return wrap;
   }
-
-  visibleProjects.forEach((p) => {
-    const monitors = byProject.get(p.id) || [];
-    const card = el("div", "folder-card");
-    card.append(el("div", "ficon", "📁"));
-    card.append(el("div", "fname", p.name));
-    card.append(el("div", "fmeta", monitors.length === 1 ? "1 monitor" : `${monitors.length} monitors`));
-    const counts = el("div", "fcounts");
-    counts.append(el("span", "fchip", `${monitors.filter((m) => m.active).length} active`));
-    counts.append(el("span", "fchip", `${monitors.filter((m) => m.blocks.length > 0).length} scheduled`));
-    card.append(counts);
-    card.onclick = () => openProject(p.id);
-    grid.append(card);
-  });
+  const shown = compact ? project.blocks.slice(0, 3) : project.blocks;
+  shown.forEach((b) => wrap.append(el("span", "block-chip", describeBlock(b))));
+  if (compact && project.blocks.length > 3) {
+    wrap.append(el("span", "block-chip more", `+${project.blocks.length - 3} more`));
+  }
+  if (project.nextTransition) {
+    const when = new Date(project.nextTransition.at);
+    wrap.append(el("div", "sched-next",
+      `Next: turns ${project.nextTransition.to === "active" ? "ON" : "OFF"} ${when.toLocaleString([], {
+        weekday: "short", hour: "2-digit", minute: "2-digit" })}`));
+  }
+  return wrap;
 }
 
-function openProject(id) {
-  activeProjectId = id;
-  selected.clear();
-  $("#folderView").classList.add("hidden");
-  $("#projectView").classList.remove("hidden");
-  const project = state.projects.find((p) => p.id === id);
-  $("#projectViewTitle").textContent = id === "__all__" ? "All monitors" : (project ? project.name : "Monitors");
-  $("#projectViewIcon").textContent = id === "__all__" ? "▦" : "📁";
-  $("#pageTitle").textContent = id === "__all__" ? "All monitors" : (project ? project.name : "Monitors");
-  $("#pageSub").textContent = "Schedule, activate, or bulk-manage the monitors below.";
-  renderStats();
-  renderMonitors();
+function scheduleStateBadge(project) {
+  if (project.desiredActive === null) return el("span", "badge", "Manual");
+  return el("span", `badge ${project.inWindow ? "on" : "off"}`, project.inWindow ? "In window" : "Outside window");
 }
 
-function backToFolders() {
-  activeProjectId = null;
-  selected.clear();
-  $("#projectView").classList.add("hidden");
-  $("#folderView").classList.remove("hidden");
-  $("#pageTitle").textContent = "Projects";
-  $("#pageSub").textContent = "Pick a project to see its monitors, or manage everything at once.";
-  renderStats();
-  renderFolders();
-}
-
-function renderMonitors() {
-  if (activeProjectId === null) return; // folder grid is shown instead
-  const list = $("#monitorList");
-  const term = $("#search").value.trim().toLowerCase();
-  const onlyScheduled = $("#scheduledOnly").checked;
-  const onlyInactive = $("#inactiveOnly").checked;
-
-  const scope = monitorsInScope(activeProjectId);
-  const liveIds = new Set(scope.map((m) => m.id));
-  [...selected].forEach((id) => { if (!liveIds.has(id)) selected.delete(id); });
-
-  const rows = scope.filter((m) => {
-    if (onlyScheduled && !m.blocks.length) return false;
-    if (onlyInactive && m.active) return false;
-    if (!term) return true;
-    return `${m.name} ${m.projectName}`.toLowerCase().includes(term);
-  });
-
+// ---------- projects view (homepage) ----------
+function renderProjects() {
+  const list = $("#projectList");
+  const term = $("#projectSearch").value.trim().toLowerCase();
   list.innerHTML = "";
-  $("#emptyMonitors").classList.toggle("hidden", rows.length > 0);
-  renderBulkBar(rows);
 
-  rows.forEach((m) => {
-    const row = el("div", `mon${selected.has(m.id) ? " sel" : ""}`);
+  const visible = state.projects.filter((p) => !term || p.name.toLowerCase().includes(term));
+  $("#emptyProjects").classList.toggle("hidden", state.projects.length > 0);
+
+  const liveIds = new Set(visible.map((p) => p.id));
+  [...selectedProjects].forEach((id) => { if (!liveIds.has(id)) selectedProjects.delete(id); });
+  renderProjectSelectBar(visible);
+
+  visible.forEach((p) => {
+    const row = el("div", `prow${selectedProjects.has(p.id) ? " sel" : ""}`);
 
     const check = el("input");
     check.type = "checkbox";
     check.className = "rowcheck";
-    check.checked = selected.has(m.id);
+    check.checked = selectedProjects.has(p.id);
+    check.setAttribute("aria-label", `Select ${p.name}`);
     check.onchange = () => {
-      check.checked ? selected.add(m.id) : selected.delete(m.id);
-      renderMonitors();
+      check.checked ? selectedProjects.add(p.id) : selectedProjects.delete(p.id);
+      renderProjects();
     };
     row.append(check);
 
-    const lead = el("div", "lead");
-    const name = el("div", "name");
-    name.append(el("span", null, m.name));
-    name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Inactive"));
-    if (m.blocks.length) {
-      name.append(el("span", "badge auto", m.inWindow ? "In window" : "Outside window"));
-    }
-    if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
-    lead.append(name);
+    const open = el("button", "prow-open");
+    open.setAttribute("aria-label", `Open ${p.name}`);
+    const lead = el("span", "lead");
+    lead.append(el("span", "pname", p.name));
+    const bits = [`${p.monitorCount} monitor${p.monitorCount === 1 ? "" : "s"}`, `${p.activeCount} on`];
+    if (p.website) bits.push(p.website.replace(/^https?:\/\//, ""));
+    lead.append(el("span", "meta", bits.join(" · ")));
+    open.append(lead);
+    open.append(icon(ICON_CHEVRON, "ico chev"));
+    open.onclick = () => openProject(p.id);
+    row.append(open);
 
-    const bits = [m.projectName, `${m.promptCount ?? 0} prompts`, (m.models || []).length + " models"];
-    if (m.countryCode) bits.push(`${m.countryCode}/${m.languageCode || "—"}`);
-    lead.append(el("div", "meta", bits.join(" · ")));
-    row.append(lead);
+    const mid = el("div", "prow-sched");
+    mid.append(scheduleStateBadge(p));
+    mid.append(scheduleSummary(p, { compact: true }));
+    row.append(mid);
 
-    const sched = el("div", "sched");
-    if (m.blocks.length) {
-      m.blocks.slice(0, 2).forEach((b) => sched.append(el("div", null, describeBlock(b))));
-      if (m.blocks.length > 2) sched.append(el("div", "muted", `+${m.blocks.length - 2} more block(s)`));
-      if (m.nextTransition) {
-        const when = new Date(m.nextTransition.at);
-        sched.append(el("div", "muted",
-          `Next: ${m.nextTransition.to} at ${when.toLocaleString([], {
-            weekday: "short", hour: "2-digit", minute: "2-digit" })}`));
-      }
-    } else {
-      sched.append(el("div", null, "No schedule — runs manually"));
-    }
-    row.append(sched);
-
-    const actions = el("div", "actions");
-    const toggle = el("button", "btn", m.active ? "Deactivate" : "Activate");
-    toggle.disabled = !canMutate();
-    toggle.onclick = async () => {
-      toggle.disabled = true;
-      try {
-        const res = await api(`/api/monitors/${m.id}/active`, {
-          method: "POST", body: { active: !m.active } });
-        apply(res.state);
-        toast(`${m.name} is now ${!m.active ? "active" : "inactive"}`);
-      } catch (err) { toast(err.message, "err"); }
-      finally { toggle.disabled = !canMutate(); }
-    };
-    const edit = el("button", "btn primary", m.blocks.length ? "Manage schedule" : "Schedule");
-    edit.disabled = !canMutate();
-    edit.onclick = () => openEditor(m);
-    actions.append(toggle, edit);
+    const actions = el("div", "prow-actions");
+    const sched = el("button", "btn primary", p.blocks.length ? "Edit schedule" : "Add schedule");
+    sched.disabled = !canMutate();
+    sched.onclick = () => openEditor(p);
+    actions.append(sched);
     row.append(actions);
 
     list.append(row);
   });
 }
 
-function renderBulkBar(visibleRows) {
-  $("#bulkBar").classList.toggle("hidden", selected.size === 0);
-  $("#selectedCount").textContent = `${selected.size} selected`;
+function renderProjectSelectBar(visibleRows) {
+  const visibleIds = visibleRows.map((p) => p.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedProjects.has(id));
+  const selectAll = $("#selectAllProjects");
+  selectAll.checked = allVisibleSelected;
+  selectAll.disabled = !visibleIds.length;
+  selectAll.onchange = () => {
+    if (selectAll.checked) visibleIds.forEach((id) => selectedProjects.add(id));
+    else visibleIds.forEach((id) => selectedProjects.delete(id));
+    renderProjects();
+  };
+  $("#selectAllProjectsLabel").textContent = selectedProjects.size ? "Select all" : `Select all (${visibleIds.length})`;
+  $("#projectBulkActions").classList.toggle("hidden", selectedProjects.size === 0);
+  $("#selectedProjectCount").textContent = `${selectedProjects.size} selected`;
+}
+
+function openProject(id) {
+  activeProjectId = id;
+  selectedMonitors.clear();
+  $("#crumbs").classList.remove("hidden");
+  $("#projectsView").classList.add("hidden");
+  $("#projectView").classList.remove("hidden");
+  const project = state.projects.find((p) => p.id === id);
+  const name = project ? project.name : "Project";
+  $("#projectViewTitle").textContent = name;
+  $("#pageTitle").textContent = name;
+  $("#pageSub").textContent = "This project's schedule drives every monitor below.";
+  renderStats();
+  renderProjectScheduleBar();
+  renderMonitors();
+}
+
+function backToProjects() {
+  activeProjectId = null;
+  selectedMonitors.clear();
+  $("#crumbs").classList.add("hidden");
+  $("#projectView").classList.add("hidden");
+  $("#projectsView").classList.remove("hidden");
+  $("#pageTitle").textContent = "Projects";
+  $("#pageSub").textContent = "Every project and its schedule. Open one to see its monitors.";
+  renderStats();
+  renderProjects();
+}
+
+/** The project's schedule, shown inside the project — scheduling is only ever
+ * done here at project level, never per monitor. */
+function renderProjectScheduleBar() {
+  const project = currentProject();
+  const bar = $("#projectScheduleBar");
+  bar.innerHTML = "";
+  if (!project) return;
+
+  const left = el("div", "psb-left");
+  const head = el("div", "psb-head");
+  head.append(icon(ICON_CLOCK, "ico"));
+  head.append(el("span", null, "Project schedule"));
+  head.append(scheduleStateBadge(project));
+  left.append(head);
+  left.append(scheduleSummary(project));
+  bar.append(left);
+
+  const btn = el("button", "btn primary", project.blocks.length ? "Edit schedule" : "Add schedule");
+  btn.disabled = !canMutate();
+  btn.onclick = () => openEditor(project);
+  bar.append(btn);
+}
+
+// ---------- monitors (inside a project) ----------
+function renderMonitors() {
+  if (activeProjectId === null) return; // project list is shown instead
+  const list = $("#monitorList");
+  const term = $("#search").value.trim().toLowerCase();
+  const onlyInactive = $("#inactiveOnly").checked;
+
+  const scope = monitorsInScope(activeProjectId);
+  const liveIds = new Set(scope.map((m) => m.id));
+  [...selectedMonitors].forEach((id) => { if (!liveIds.has(id)) selectedMonitors.delete(id); });
+
+  const rows = scope.filter((m) => {
+    if (onlyInactive && m.active) return false;
+    if (!term) return true;
+    return m.name.toLowerCase().includes(term);
+  });
+
+  list.innerHTML = "";
+  $("#emptyMonitors").classList.toggle("hidden", rows.length > 0);
+  renderSelectBar(rows);
+  rows.forEach((m) => list.append(monitorRow(m, selectedMonitors, renderMonitors)));
+}
+
+function renderSelectBar(visibleRows) {
   const visibleIds = visibleRows.map((m) => m.id);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedMonitors.has(id));
   const selectAll = $("#selectAll");
   selectAll.checked = allVisibleSelected;
+  selectAll.disabled = !visibleIds.length;
   selectAll.onchange = () => {
-    if (selectAll.checked) visibleIds.forEach((id) => selected.add(id));
-    else visibleIds.forEach((id) => selected.delete(id));
+    if (selectAll.checked) visibleIds.forEach((id) => selectedMonitors.add(id));
+    else visibleIds.forEach((id) => selectedMonitors.delete(id));
     renderMonitors();
   };
+  $("#selectAllLabel").textContent = selectedMonitors.size ? "Select all" : `Select all (${visibleIds.length})`;
+  $("#bulkActions").classList.toggle("hidden", selectedMonitors.size === 0);
+  $("#selectedCount").textContent = `${selectedMonitors.size} selected`;
+}
+
+// ---------- all monitors (flat, across every project) ----------
+// View/activate only — scheduling always happens on the Projects tab.
+function monitorRow(m, selectedSet, onToggleRerender) {
+  const row = el("div", `mrow${selectedSet.has(m.id) ? " sel" : ""}`);
+
+  const check = el("input");
+  check.type = "checkbox";
+  check.className = "rowcheck";
+  check.checked = selectedSet.has(m.id);
+  check.setAttribute("aria-label", `Select ${m.name}`);
+  check.onchange = () => {
+    check.checked ? selectedSet.add(m.id) : selectedSet.delete(m.id);
+    onToggleRerender();
+  };
+  row.append(check);
+
+  const lead = el("div", "lead");
+  const name = el("div", "mname");
+  name.append(el("span", null, m.name));
+  if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
+  lead.append(name);
+  const bits = [m.projectName, `${m.promptCount ?? 0} prompts`, `${(m.models || []).length} models`];
+  if (m.countryCode) bits.push(`${m.countryCode}/${m.languageCode || "—"}`);
+  lead.append(el("div", "meta", bits.join(" · ")));
+  row.append(lead);
+
+  const toggleWrap = el("div", "toggle-wrap");
+  const stateLabel = el("span", `toggle-state ${m.active ? "on" : "off"}`, m.active ? "ON" : "OFF");
+  const toggle = el("button", `toggle${m.active ? " on" : ""}`);
+  toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-checked", String(m.active));
+  toggle.setAttribute("aria-label", `${m.name} is ${m.active ? "on" : "off"}`);
+  toggle.append(el("span", "knob"));
+  toggle.disabled = !canMutate();
+  toggle.onclick = async () => {
+    toggle.disabled = true;
+    try {
+      const res = await api(`/api/monitors/${m.id}/active`, { method: "POST", body: { active: !m.active } });
+      apply(res.state);
+      toast(`${m.name} is now ${!m.active ? "ON" : "OFF"}`);
+    } catch (err) { toast(err.message, "err"); }
+    finally { toggle.disabled = !canMutate(); }
+  };
+  toggleWrap.append(stateLabel, toggle);
+  row.append(toggleWrap);
+
+  return row;
+}
+
+function renderAllMonitors() {
+  const term = $("#allMonSearch").value.trim().toLowerCase();
+  const onlyInactive = $("#allMonInactiveOnly").checked;
+
+  const liveIds = new Set(state.monitors.map((m) => m.id));
+  [...selectedAllMonitors].forEach((id) => { if (!liveIds.has(id)) selectedAllMonitors.delete(id); });
+
+  const rows = state.monitors.filter((m) => {
+    if (onlyInactive && m.active) return false;
+    if (!term) return true;
+    return `${m.name} ${m.projectName}`.toLowerCase().includes(term);
+  });
+
+  const primary = $("#allMonStatPrimary");
+  primary.innerHTML = "";
+  primary.append(el("b", null, `${state.monitors.filter((m) => m.active).length}/${state.monitors.length}`), el("span", null, "monitors on"));
+
+  const list = $("#allMonitorList");
+  list.innerHTML = "";
+  $("#allMonEmpty").classList.toggle("hidden", rows.length > 0);
+  renderAllMonSelectBar(rows);
+  rows.forEach((m) => list.append(monitorRow(m, selectedAllMonitors, renderAllMonitors)));
+}
+
+function renderAllMonSelectBar(visibleRows) {
+  const visibleIds = visibleRows.map((m) => m.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedAllMonitors.has(id));
+  const selectAll = $("#allMonSelectAll");
+  selectAll.checked = allVisibleSelected;
+  selectAll.disabled = !visibleIds.length;
+  selectAll.onchange = () => {
+    if (selectAll.checked) visibleIds.forEach((id) => selectedAllMonitors.add(id));
+    else visibleIds.forEach((id) => selectedAllMonitors.delete(id));
+    renderAllMonitors();
+  };
+  $("#allMonSelectAllLabel").textContent = selectedAllMonitors.size ? "Select all" : `Select all (${visibleIds.length})`;
+  $("#allMonBulkActions").classList.toggle("hidden", selectedAllMonitors.size === 0);
+  $("#allMonSelectedCount").textContent = `${selectedAllMonitors.size} selected`;
+}
+
+async function allMonBulkSetActive(active) {
+  if (!selectedAllMonitors.size) return;
+  try {
+    const res = await api("/api/monitors/active-bulk", { method: "POST",
+      body: { monitorIds: [...selectedAllMonitors], active } });
+    apply(res.state);
+    const failedCount = res.failed.length;
+    toast(failedCount
+      ? `${res.changed.length} updated, ${failedCount} failed`
+      : `${res.changed.length} monitor(s) ${active ? "turned on" : "turned off"}`,
+      failedCount ? "err" : "ok");
+  } catch (err) { toast(err.message, "err"); }
 }
 
 function renderTop() {
@@ -261,27 +405,6 @@ function renderTop() {
     : (state.settings.hasApiKey ? "Automation paused" : "No API key");
   $("#tickLabel").textContent = label;
   $("#tickState .dot").classList.toggle("off", !on);
-  $("#rightAutomation").textContent = label;
-}
-
-function renderRightRail() {
-  if (!session) return;
-  $("#avatarInitial").textContent = session.email.slice(0, 1).toUpperCase();
-  $("#whoami").textContent = session.email;
-  $("#whoRole").textContent = session.role;
-  const monitors = state.monitors;
-  const wrap = $("#rightStats");
-  wrap.innerHTML = "";
-  const rows = [
-    [`${monitors.filter((m) => m.active).length}/${monitors.length}`, "monitors active"],
-    [monitors.filter((m) => m.blocks.length > 0).length, "on a schedule"],
-    [state.projects.length, "projects synced"],
-  ];
-  rows.forEach(([value, label]) => {
-    const row = el("div", "small muted");
-    row.innerHTML = `<b style="color:var(--ink)">${value}</b> ${label}`;
-    wrap.append(row);
-  });
 }
 
 function renderSettings() {
@@ -297,15 +420,21 @@ function renderSettings() {
 function apply(next) {
   state = next;
   renderTop();
-  if (activeProjectId === null) renderFolders(); else renderMonitors();
+  if (activeProjectId === null) {
+    renderProjects();
+  } else {
+    renderProjectScheduleBar();
+    renderMonitors();
+  }
+  if (!$("#tab-allmonitors").classList.contains("hidden")) renderAllMonitors();
   renderStats();
   renderSettings();
-  renderRightRail();
   applyRoleUI();
 }
 
 const MUTATE_BUTTON_IDS = ["syncBtn", "runNow", "addByIdBtn", "adoptSave",
-  "bulkActivate", "bulkDeactivate", "bulkSchedule", "bulkClearSchedule"];
+  "bulkActivate", "bulkDeactivate", "allMonBulkActivate", "allMonBulkDeactivate",
+  "projectBulkActivate", "projectBulkDeactivate", "projectBulkSchedule", "projectBulkClearSchedule"];
 const SETTINGS_INPUT_IDS = ["apiKey", "saveKey", "testKey", "clearKey",
   "timezone", "tickSeconds", "schedulerEnabled", "saveScheduler"];
 
@@ -313,7 +442,6 @@ function applyRoleUI() {
   MUTATE_BUTTON_IDS.forEach((id) => { const e = $(`#${id}`); if (e) e.disabled = !canMutate(); });
   SETTINGS_INPUT_IDS.forEach((id) => { const e = $(`#${id}`); if (e) e.disabled = !canSettings(); });
   $("#teamTabBtn").classList.toggle("hidden", !canManageTeam());
-  $("#whoami").textContent = session ? session.email : "";
 }
 
 // ---------- usage + logs ----------
@@ -376,27 +504,35 @@ async function loadLogs() {
   });
 }
 
-// ---------- schedule editor (multiple time blocks per monitor) ----------
+// ---------- schedule editor (a PROJECT's time blocks) ----------
 // Structure/logic ported from the time-block-scheduler reference: a block is
 // a single (startDay,startTime) -> (endDay,endTime) range, not a set of
 // repeated weekdays. Days are 0=Mon..6=Sun to match this app's convention
 // (the reference used 1-7); everything else — minute math, the "end must be
 // later than start" rule, the live preview, the blocks table — mirrors it.
-function currentMonitor(id) {
-  return state.monitors.find((m) => m.id === id) || null;
+// Schedules are always project-level; monitors have no schedule of their own.
+function editingProject() {
+  return state.projects.find((p) => p.id === editing.projectId) || null;
 }
+
+const WEEK_MINUTES = 7 * 1440;
 
 function blockMinutes(day, time) {
   const [h, m] = time.split(":").map(Number);
   return day * 1440 + h * 60 + m;
 }
 
-function durationText(startMin, endMin) {
-  let diff = endMin - startMin;
-  const daysCount = Math.floor(diff / 1440);
-  diff %= 1440;
-  const hours = Math.floor(diff / 60);
-  const mins = diff % 60;
+/** end <= start means the block wraps past Sunday into next Monday, not
+ * that it's zero-length — add a week back to get the real duration. */
+function blockDuration(startMin, endMin) {
+  return endMin > startMin ? endMin - startMin : WEEK_MINUTES - startMin + endMin;
+}
+
+function durationText(minutes) {
+  const daysCount = Math.floor(minutes / 1440);
+  minutes %= 1440;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
   const parts = [];
   if (daysCount) parts.push(`${daysCount}d`);
   if (hours) parts.push(`${hours}h`);
@@ -413,11 +549,33 @@ function populateBlockDaySelects() {
 }
 
 function resetBlockForm() {
+  editingBlockId = null;
   populateBlockDaySelects();
   $("#schStart").value = "09:00";
   $("#schEnd").value = "17:00";
+  $("#blockTrigger").value = "on_off";
   $("#blockError").textContent = "";
   $("#blockPreview").classList.add("hidden");
+  $("#blockFormLabel").textContent = "New time block";
+  $("#blockSave").textContent = "Add block";
+  $("#blockEditCancel").classList.add("hidden");
+}
+
+/** Load an existing block into the form so it can be changed in place,
+ * instead of only ever being deletable. */
+function startEditBlock(block) {
+  editingBlockId = block.id;
+  $("#blockStartDay").value = String(block.startDay);
+  $("#blockEndDay").value = String(block.endDay);
+  $("#schStart").value = block.startTime;
+  $("#schEnd").value = block.endTime;
+  $("#blockTrigger").value = block.trigger;
+  $("#blockError").textContent = "";
+  $("#blockFormLabel").textContent = "Edit time block";
+  $("#blockSave").textContent = "Save changes";
+  $("#blockEditCancel").classList.remove("hidden");
+  updateBlockPreview();
+  $(".block-form").scrollIntoView({ block: "nearest" });
 }
 
 function updateBlockPreview() {
@@ -427,38 +585,39 @@ function updateBlockPreview() {
   if (!startTime || !endTime) return;
   const start = blockMinutes(startDay, startTime), end = blockMinutes(endDay, endTime);
   const preview = $("#blockPreview");
-  if (end <= start) {
+  if (start === end) {
     preview.classList.add("hidden");
     return;
   }
-  preview.innerHTML = `<b>Block:</b> ${DAYS[startDay]} ${startTime} → ${DAYS[endDay]} ${endTime}
-    &nbsp;·&nbsp; Duration: <b>${durationText(start, end)}</b>
-    &nbsp;·&nbsp; Start = <b>ON</b>, End = <b>OFF</b>`;
+  const wraps = end <= start;
+  const trigger = $("#blockTrigger").value;
+  const openState = trigger === "off_on" ? "OFF" : "ON";
+  const closeState = trigger === "off_on" ? "ON" : "OFF";
+  preview.innerHTML = `<b>Block:</b> ${DAYS[startDay]} ${startTime} → ${DAYS[endDay]} ${endTime}${wraps ? " (wraps into next week)" : ""}
+    &nbsp;·&nbsp; Duration: <b>${durationText(blockDuration(start, end))}</b>
+    &nbsp;·&nbsp; Start = <b>${openState}</b>, End = <b>${closeState}</b>`;
   preview.classList.remove("hidden");
 }
 
-function openEditor(monitor) {
-  editing = { mode: "single", monitorId: monitor.id };
-  $("#modalTitle").textContent = monitor.name;
-  $("#modalSub").textContent = `${monitor.projectName} · currently ${monitor.active ? "active" : "inactive"}. Blocks on this monitor can't overlap or touch each other.`;
+function openEditor(project) {
+  editing = { mode: "single", projectId: project.id };
+  $("#modalTitle").textContent = `${project.name} — schedule`;
+  $("#modalSub").textContent =
+    `Applies to all ${project.monitorCount} monitor${project.monitorCount === 1 ? "" : "s"} in this project. ` +
+    "Blocks can't overlap or touch each other.";
   $("#blockTableSection").classList.remove("hidden");
-  $("#schDeleteAll").classList.toggle("hidden", monitor.blocks.length === 0);
+  $("#schDeleteAll").classList.toggle("hidden", project.blocks.length === 0);
   resetBlockForm();
   renderBlockTable();
   $("#modal").classList.remove("hidden");
 }
 
 function openBulkEditor() {
-  if (!selected.size) return toast("Select at least one monitor first", "err");
-  const ids = [...selected];
-  const monitors = state.monitors.filter((m) => ids.includes(m.id));
-  editing = { mode: "bulk", monitorIds: ids };
-  $("#modalTitle").textContent = `${ids.length} monitors selected`;
-  const projects = new Set(monitors.map((m) => m.projectName));
-  $("#modalSub").textContent = (projects.size === 1
-    ? `All in ${[...projects][0]}. `
-    : `Across ${projects.size} projects. `)
-    + "Adds one new time block to each — any monitor where it would overlap an existing block is skipped.";
+  if (!selectedProjects.size) return toast("Select at least one project first", "err");
+  const ids = [...selectedProjects];
+  editing = { mode: "bulk", projectIds: ids };
+  $("#modalTitle").textContent = `${ids.length} projects selected`;
+  $("#modalSub").textContent = "Adds one new time block to each — any project where it would overlap an existing block is skipped.";
   $("#blockTableSection").classList.add("hidden");
   $("#schDeleteAll").classList.add("hidden");
   resetBlockForm();
@@ -466,12 +625,13 @@ function openBulkEditor() {
 }
 
 function renderBlockTable() {
-  const monitor = currentMonitor(editing.monitorId);
-  const blocks = [...monitor.blocks].sort((a, b) => blockMinutes(a.startDay, a.startTime) - blockMinutes(b.startDay, b.startTime));
+  const project = editingProject();
+  if (!project) return;
+  const blocks = [...project.blocks].sort((a, b) => blockMinutes(a.startDay, a.startTime) - blockMinutes(b.startDay, b.startTime));
   $("#blockCount").textContent = `${blocks.length} block${blocks.length === 1 ? "" : "s"}`;
   const wrap = $("#blockTableWrap");
   if (!blocks.length) {
-    wrap.innerHTML = '<div class="block-empty">No time blocks yet — this monitor runs manually.</div>';
+    wrap.innerHTML = '<div class="block-empty">No time blocks yet — this project\'s monitors run manually.</div>';
     return;
   }
   wrap.innerHTML = "";
@@ -480,18 +640,23 @@ function renderBlockTable() {
   const tbody = el("tbody");
   blocks.forEach((block) => {
     const start = blockMinutes(block.startDay, block.startTime), end = blockMinutes(block.endDay, block.endTime);
-    const tr = el("tr");
+    const inverted = block.trigger === "off_on";
+    const tr = el("tr", block.id === editingBlockId ? "editing" : "");
+    tr.title = "Click to edit this block";
     tr.innerHTML = `
       <td><b>${DAYS[block.startDay]}</b><br><span class="btime">${block.startTime}</span></td>
       <td><b>${DAYS[block.endDay]}</b><br><span class="btime">${block.endTime}</span></td>
-      <td class="muted">${durationText(start, end)}</td>
-      <td><span class="status"><span class="bdot"></span>ON → OFF</span></td>`;
+      <td class="muted">${durationText(blockDuration(start, end))}</td>
+      <td><span class="status${inverted ? " inverted" : ""}"><span class="bdot"></span>${inverted ? "OFF → ON" : "ON → OFF"}</span></td>`;
+    tr.onclick = () => startEditBlock(block);
     const rmCell = el("td");
     rmCell.style.textAlign = "right";
-    const rmBtn = el("button", "iconbtn", "✕");
+    const rmBtn = el("button", "iconbtn");
+    rmBtn.append(icon(ICON_TRASH, "ico"));
     rmBtn.disabled = !canMutate();
     rmBtn.title = "Remove this block";
-    rmBtn.onclick = () => deleteBlock(block.id);
+    rmBtn.setAttribute("aria-label", `Remove block ${describeBlock(block)}`);
+    rmBtn.onclick = (e) => { e.stopPropagation(); deleteBlock(block.id); };
     rmCell.append(rmBtn);
     tr.append(rmCell);
     tbody.append(tr);
@@ -500,48 +665,52 @@ function renderBlockTable() {
   wrap.append(table);
 }
 
-async function addBlock() {
+async function saveBlock() {
   $("#blockError").textContent = "";
   const startDay = Number($("#blockStartDay").value), endDay = Number($("#blockEndDay").value);
   const startTime = $("#schStart").value, endTime = $("#schEnd").value;
-  const start = blockMinutes(startDay, startTime), end = blockMinutes(endDay, endTime);
-  if (end <= start) {
-    $("#blockError").textContent = "The end of the block must be later than its start. Choose a later day/time.";
+  const trigger = $("#blockTrigger").value;
+  if (startDay === endDay && startTime === endTime) {
+    $("#blockError").textContent = "Start and end can't be the same moment — pick a different end.";
     return;
   }
-  const body = { startDay, startTime, endDay, endTime };
+  const body = { startDay, startTime, endDay, endTime, trigger };
   try {
     if (editing.mode === "bulk") {
-      const res = await api("/api/schedules/bulk", { method: "POST", body: { ...body, monitorIds: editing.monitorIds } });
+      const res = await api("/api/schedules/bulk", { method: "POST", body: { ...body, projectIds: editing.projectIds } });
       apply(res.state);
       $("#modal").classList.add("hidden");
       const skipped = res.skipped.length;
       toast(skipped
-        ? `Added to ${res.applied} monitor(s), skipped ${skipped} (would overlap)`
-        : `Added to ${res.applied} monitor(s)`, skipped ? "err" : "ok");
+        ? `Added to ${res.applied} project(s), skipped ${skipped} (would overlap)`
+        : `Added to ${res.applied} project(s)`, skipped ? "err" : "ok");
       loadLogs();
       return;
     }
-    const res = await api(`/api/schedules/${editing.monitorId}`, { method: "POST", body });
+    const wasEditing = editingBlockId;
+    const endpoint = wasEditing
+      ? `/api/schedules/${editing.projectId}/${wasEditing}`
+      : `/api/schedules/${editing.projectId}`;
+    const res = await api(endpoint, { method: wasEditing ? "PUT" : "POST", body });
     apply(res.state);
     resetBlockForm();
     renderBlockTable();
-    $("#schDeleteAll").classList.toggle("hidden", currentMonitor(editing.monitorId).blocks.length === 0);
-    toast("Time block added");
+    $("#schDeleteAll").classList.toggle("hidden", editingProject().blocks.length === 0);
+    toast(wasEditing ? "Time block updated" : "Time block added");
     loadLogs();
   } catch (err) {
-    if (editing.mode === "bulk") toast(err.message, "err");
-    else $("#blockError").textContent = err.message;
+    $("#blockError").textContent = err.message;
   }
 }
 
 async function deleteBlock(blockId) {
   if (!confirm("Remove this time block?")) return;
   try {
-    const res = await api(`/api/schedules/${editing.monitorId}/${blockId}`, { method: "DELETE" });
+    const res = await api(`/api/schedules/${editing.projectId}/${blockId}`, { method: "DELETE" });
     apply(res.state);
+    if (blockId === editingBlockId) resetBlockForm();
     renderBlockTable();
-    $("#schDeleteAll").classList.toggle("hidden", currentMonitor(editing.monitorId).blocks.length === 0);
+    $("#schDeleteAll").classList.toggle("hidden", editingProject().blocks.length === 0);
     toast("Block removed");
   } catch (err) { toast(err.message, "err"); }
 }
@@ -709,18 +878,22 @@ document.querySelectorAll(".side-btn[data-tab]").forEach((tab) => {
   tab.onclick = () => {
     document.querySelectorAll(".side-btn[data-tab]").forEach((t) => t.classList.remove("active"));
     tab.classList.add("active");
-    ["monitors", "logs", "settings", "team"].forEach((name) =>
+    ["monitors", "allmonitors", "logs", "settings", "team"].forEach((name) =>
       $(`#tab-${name}`).classList.toggle("hidden", name !== tab.dataset.tab));
+    if (tab.dataset.tab === "allmonitors") renderAllMonitors();
     if (tab.dataset.tab === "logs") loadLogs();
     if (tab.dataset.tab === "settings") loadUsage();
     if (tab.dataset.tab === "team") { renderInviteRoleOptions(); loadTeam(); }
   };
 });
 
-$("#folderSearch").oninput = renderFolders;
-$("#backToFolders").onclick = backToFolders;
+$("#projectSearch").oninput = renderProjects;
+$("#backToProjects").onclick = backToProjects;
 $("#search").oninput = renderMonitors;
-$("#scheduledOnly").onchange = renderMonitors;
+$("#allMonSearch").oninput = renderAllMonitors;
+$("#allMonInactiveOnly").onchange = renderAllMonitors;
+$("#allMonBulkActivate").onclick = () => allMonBulkSetActive(true);
+$("#allMonBulkDeactivate").onclick = () => allMonBulkSetActive(false);
 $("#inactiveOnly").onchange = renderMonitors;
 $("#logLevel").onchange = loadLogs;
 $("#logSearch").oninput = loadLogs;
@@ -728,35 +901,27 @@ $("#schStart").oninput = updateBlockPreview;
 $("#schEnd").oninput = updateBlockPreview;
 $("#blockStartDay").onchange = updateBlockPreview;
 $("#blockEndDay").onchange = updateBlockPreview;
+$("#blockTrigger").onchange = updateBlockPreview;
 $("#schCancel").onclick = () => $("#modal").classList.add("hidden");
-$("#blockSave").onclick = addBlock;
+$("#blockSave").onclick = saveBlock;
+$("#blockEditCancel").onclick = () => { resetBlockForm(); renderBlockTable(); };
 $("#schDeleteAll").onclick = async () => {
-  if (!confirm("Remove every time block from this monitor?")) return;
+  const project = editingProject();
+  if (!confirm(`Remove every time block from '${project.name}'? Its monitors go back to manual.`)) return;
   try {
-    const res = await api(`/api/schedules/${editing.monitorId}`, { method: "DELETE" });
+    const res = await api(`/api/schedules/${editing.projectId}`, { method: "DELETE" });
     apply(res.state);
     $("#modal").classList.add("hidden");
     toast("Schedule cleared");
-  } catch (err) { toast(err.message, "err"); }
-};
-
-$("#bulkSchedule").onclick = openBulkEditor;
-
-$("#bulkClearSchedule").onclick = async () => {
-  if (!selected.size) return;
-  if (!confirm(`Remove all schedule blocks from ${selected.size} monitor(s)?`)) return;
-  try {
-    const res = await api("/api/schedules/bulk", { method: "DELETE", body: { monitorIds: [...selected] } });
-    apply(res.state);
-    toast(`Schedules cleared for ${selected.size} monitor(s)`);
+    loadLogs();
   } catch (err) { toast(err.message, "err"); }
 };
 
 async function bulkSetActive(active) {
-  if (!selected.size) return;
+  if (!selectedMonitors.size) return;
   try {
     const res = await api("/api/monitors/active-bulk", { method: "POST",
-      body: { monitorIds: [...selected], active } });
+      body: { monitorIds: [...selectedMonitors], active } });
     apply(res.state);
     const failedCount = res.failed.length;
     toast(failedCount
@@ -767,6 +932,35 @@ async function bulkSetActive(active) {
 }
 $("#bulkActivate").onclick = () => bulkSetActive(true);
 $("#bulkDeactivate").onclick = () => bulkSetActive(false);
+
+// ---------- project-level bulk actions (Projects tab) ----------
+async function projectBulkSetActive(active) {
+  if (!selectedProjects.size) return;
+  const monitorIds = state.monitors.filter((m) => selectedProjects.has(m.projectId)).map((m) => m.id);
+  if (!monitorIds.length) return toast("Selected project(s) have no monitors", "err");
+  try {
+    const res = await api("/api/monitors/active-bulk", { method: "POST", body: { monitorIds, active } });
+    apply(res.state);
+    const failedCount = res.failed.length;
+    toast(failedCount
+      ? `${res.changed.length} updated, ${failedCount} failed`
+      : `${res.changed.length} monitor(s) ${active ? "turned on" : "turned off"}`,
+      failedCount ? "err" : "ok");
+  } catch (err) { toast(err.message, "err"); }
+}
+$("#projectBulkActivate").onclick = () => projectBulkSetActive(true);
+$("#projectBulkDeactivate").onclick = () => projectBulkSetActive(false);
+$("#projectBulkSchedule").onclick = openBulkEditor;
+$("#projectBulkClearSchedule").onclick = async () => {
+  if (!selectedProjects.size) return;
+  if (!confirm(`Remove all schedule blocks from ${selectedProjects.size} project(s)? Their monitors go back to manual.`)) return;
+  try {
+    const res = await api("/api/schedules/bulk", { method: "DELETE", body: { projectIds: [...selectedProjects] } });
+    apply(res.state);
+    toast(`Schedules cleared for ${selectedProjects.size} project(s)`);
+    loadLogs();
+  } catch (err) { toast(err.message, "err"); }
+};
 
 $("#syncBtn").onclick = async () => {
   const button = $("#syncBtn");
@@ -784,7 +978,7 @@ $("#syncBtn").onclick = async () => {
 $("#addByIdBtn").onclick = () => {
   const select = $("#adoptProject");
   select.innerHTML = state.projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
-  if (activeProjectId && activeProjectId !== "__all__") select.value = activeProjectId;
+  if (activeProjectId) select.value = activeProjectId;
   $("#adoptRow").classList.toggle("hidden");
 };
 $("#adoptCancel").onclick = () => $("#adoptRow").classList.add("hidden");

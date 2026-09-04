@@ -12,10 +12,16 @@
 <div class="shell">
 
   <aside class="sidebar">
-    <div class="side-logo">⏱</div>
+    <div class="side-logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3 1-1.7-4-2.1Z"/></svg>
+    </div>
     <nav class="side-nav">
-      <button class="side-btn active" data-tab="monitors" title="Monitors">
+      <button class="side-btn active" data-tab="monitors" title="Projects">
         <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5v5H3V7Zm0 6h7v5H5a2 2 0 0 1-2-2v-3Zm9 5v-5h9v3a2 2 0 0 1-2 2h-7Zm0-7V5h7a2 2 0 0 1 2 2v4h-9Z"/></svg>
+        <span>Projects</span>
+      </button>
+      <button class="side-btn" data-tab="allmonitors" title="Monitors">
+        <svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
         <span>Monitors</span>
       </button>
       <button class="side-btn" data-tab="logs" title="Logs">
@@ -54,37 +60,54 @@
       </div>
     </header>
 
-    <!-- MONITORS -->
+    <!-- PROJECTS (homepage) -->
     <section id="tab-monitors" class="panel">
+      <!-- Back button lives at the very top, above everything else, whenever
+           a project is open. -->
+      <div class="crumbs hidden" id="crumbs">
+        <button id="backToProjects" class="btn ghost" aria-label="Back to all projects">
+          <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>
+          All projects
+        </button>
+      </div>
+
       <div class="stats-block" id="statsBlock">
         <div class="stat-primary" id="statPrimary"></div>
         <div class="stat-secondary" id="statSecondary"></div>
       </div>
 
-      <!-- FOLDER VIEW -->
-      <div id="folderView">
+      <!-- PROJECT LIST — every project and its schedule at a glance -->
+      <div id="projectsView">
         <div class="toolbar">
-          <input id="folderSearch" class="input grow" type="search" placeholder="Search projects…">
+          <input id="projectSearch" class="input grow" type="search" placeholder="Search projects…">
           <span class="spacer"></span>
           <button id="runNow" class="btn">Run scheduler now</button>
         </div>
-        <div id="folderGrid" class="folder-grid"></div>
-        <p id="emptyFolders" class="empty hidden">No projects yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
+
+        <div class="selectbar">
+          <label class="check selectall"><input type="checkbox" id="selectAllProjects"> <span id="selectAllProjectsLabel">Select all</span></label>
+          <div id="projectBulkActions" class="bulk-actions hidden">
+            <span id="selectedProjectCount" class="pill">0 selected</span>
+            <button id="projectBulkActivate" class="btn">Turn on</button>
+            <button id="projectBulkDeactivate" class="btn">Turn off</button>
+            <button id="projectBulkSchedule" class="btn primary">Add time block</button>
+            <button id="projectBulkClearSchedule" class="btn danger solid">Clear schedules</button>
+          </div>
+        </div>
+
+        <div id="projectList" class="rowlist"></div>
+        <p id="emptyProjects" class="empty hidden">No projects yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
       </div>
 
-      <!-- PROJECT DETAIL -->
+      <!-- PROJECT DETAIL — its monitors, plus the project's own schedule -->
       <div id="projectView" class="hidden">
-        <div class="crumbs">
-          <button id="backToFolders" class="btn ghost">← All projects</button>
-          <div class="crumb-icon" id="projectViewIcon"></div>
-          <h2 id="projectViewTitle"></h2>
-        </div>
+        <h2 id="projectViewTitle" class="project-view-title"></h2>
+
+        <div class="project-schedule-bar" id="projectScheduleBar"></div>
 
         <div class="toolbar">
           <input id="search" class="input grow" type="search" placeholder="Filter monitors…">
-          <label class="check"><input type="checkbox" id="scheduledOnly"> Scheduled only</label>
           <label class="check"><input type="checkbox" id="inactiveOnly"> Inactive only</label>
-          <label class="check"><input type="checkbox" id="selectAll"> Select all visible</label>
           <span class="spacer"></span>
           <button id="addByIdBtn" class="btn">Add by ID</button>
         </div>
@@ -106,18 +129,41 @@
           </div>
         </div>
 
-        <div id="bulkBar" class="toolbar bulkbar hidden">
-          <span id="selectedCount" class="pill">0 selected</span>
-          <span class="spacer"></span>
-          <button id="bulkActivate" class="btn">Activate</button>
-          <button id="bulkDeactivate" class="btn">Deactivate</button>
-          <button id="bulkSchedule" class="btn primary">Add time block</button>
-          <button id="bulkClearSchedule" class="btn danger solid">Clear schedules</button>
+        <!-- Bulk select sits inline directly above the list, aligned with the
+             row checkboxes below it — not in a separate floating toolbar. -->
+        <div class="selectbar">
+          <label class="check selectall"><input type="checkbox" id="selectAll"> <span id="selectAllLabel">Select all</span></label>
+          <div id="bulkActions" class="bulk-actions hidden">
+            <span id="selectedCount" class="pill">0 selected</span>
+            <button id="bulkActivate" class="btn">Turn on</button>
+            <button id="bulkDeactivate" class="btn">Turn off</button>
+          </div>
         </div>
 
-        <div id="monitorList" class="list"></div>
+        <div id="monitorList" class="rowlist"></div>
         <p id="emptyMonitors" class="empty hidden">No monitors match here.</p>
       </div>
+    </section>
+
+    <!-- ALL MONITORS (flat, across every project — view/activate only; scheduling is project-level, see Projects) -->
+    <section id="tab-allmonitors" class="panel hidden">
+      <div class="stats-block" id="allMonStatsBlock">
+        <div class="stat-primary" id="allMonStatPrimary"></div>
+      </div>
+      <div class="toolbar">
+        <input id="allMonSearch" class="input grow" type="search" placeholder="Filter monitors…">
+        <label class="check"><input type="checkbox" id="allMonInactiveOnly"> Inactive only</label>
+      </div>
+      <div class="selectbar">
+        <label class="check selectall"><input type="checkbox" id="allMonSelectAll"> <span id="allMonSelectAllLabel">Select all</span></label>
+        <div id="allMonBulkActions" class="bulk-actions hidden">
+          <span id="allMonSelectedCount" class="pill">0 selected</span>
+          <button id="allMonBulkActivate" class="btn">Turn on</button>
+          <button id="allMonBulkDeactivate" class="btn">Turn off</button>
+        </div>
+      </div>
+      <div id="allMonitorList" class="rowlist"></div>
+      <p id="allMonEmpty" class="empty hidden">No monitors match here.</p>
     </section>
 
     <!-- LOGS -->
@@ -230,22 +276,6 @@
     </section>
   </main>
 
-  <aside class="rightrail">
-    <div class="profile-card">
-      <div class="avatar" id="avatarInitial"></div>
-      <div class="who" id="whoami"></div>
-      <div class="role-tag" id="whoRole"></div>
-    </div>
-    <div class="mini-card">
-      <h3>Automation</h3>
-      <div id="rightAutomation" class="muted small"></div>
-    </div>
-    <div class="mini-card">
-      <h3>This week</h3>
-      <div id="rightStats"></div>
-    </div>
-  </aside>
-
 </div><!-- /shell -->
 </div><!-- /appShell -->
 
@@ -261,7 +291,7 @@
     <p id="modalSub" class="muted small"></p>
 
     <div class="block-form">
-      <div class="section-label">New time block</div>
+      <div class="section-label" id="blockFormLabel">New time block</div>
       <div class="block-grid">
         <label class="field">Start day
           <select id="blockStartDay" class="input"></select>
@@ -276,10 +306,20 @@
         <label class="field">End time
           <input id="schEnd" class="input" type="time" value="17:00">
         </label>
-        <button id="blockSave" class="btn primary">Add block</button>
+        <div class="block-form-actions">
+          <button id="blockEditCancel" class="btn hidden">Cancel edit</button>
+          <button id="blockSave" class="btn primary">Add block</button>
+        </div>
       </div>
-      <p class="hint">Blocks may span multiple days. A block sends <b>ON</b> when it starts and
-        <b>OFF</b> when it ends — blocks on the same monitor must not overlap or touch each other.</p>
+      <label class="field trigger-field">Trigger
+        <select id="blockTrigger" class="input">
+          <option value="on_off">ON at start → OFF at end</option>
+          <option value="off_on">OFF at start → ON at end</option>
+        </select>
+      </label>
+      <p class="hint">Blocks may span multiple days, and the end can be earlier in the week than the
+        start — that means the window wraps past Sunday into next Monday (e.g. Fri → Mon covers the
+        whole weekend). Blocks on the same project must not overlap or touch each other.</p>
       <p id="blockError" class="hint err-text"></p>
       <div id="blockPreview" class="block-preview hidden"></div>
     </div>

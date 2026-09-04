@@ -33,6 +33,7 @@ export interface CleanBlock {
   startTime: string;
   endDay: number;
   endTime: string;
+  trigger: "on_off" | "off_on";
 }
 
 function cleanDay(value: unknown, label: string): number {
@@ -41,9 +42,13 @@ function cleanDay(value: unknown, label: string): number {
   return day;
 }
 
-/** A block is a single (startDay,startTime) → (endDay,endTime) window — same
- * model as the reference time block scheduler: the end must be strictly
- * later than the start (no wrapping past the end of the week). */
+/** A block is a single (startDay,startTime) → (endDay,endTime) window. Unlike
+ * the reference time block scheduler this was built from, the end is allowed
+ * to be earlier in the week than the start — that means the window wraps
+ * past Sunday into the following Monday (e.g. Fri 18:00 -> Mon 06:00, a
+ * weekend window), not that it's invalid. Only the exact same start and end
+ * is rejected, since that's ambiguous (an empty window, or the whole week —
+ * neither is likely what was intended). */
 export function cleanBlock(payload: Record<string, unknown>): CleanBlock {
   const startDay = cleanDay(payload.startDay, "start");
   const endDay = cleanDay(payload.endDay, "end");
@@ -52,13 +57,9 @@ export function cleanBlock(payload: Record<string, unknown>): CleanBlock {
   if (!VALID_TIME.test(startTime) || !VALID_TIME.test(endTime)) {
     throw new ValidationError("Times must be in 24-hour HH:MM format.");
   }
-  if (endDay * 24 * 60 + timeToMinutes(endTime) <= startDay * 24 * 60 + timeToMinutes(startTime)) {
-    throw new ValidationError("The end of the block must be later than its start.");
+  if (startDay === endDay && startTime === endTime) {
+    throw new ValidationError("Start and end can't be the same moment — pick a different end.");
   }
-  return { startDay, startTime, endDay, endTime };
-}
-
-function timeToMinutes(value: string): number {
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
+  const trigger = payload.trigger === "off_on" ? "off_on" : "on_off";
+  return { startDay, startTime, endDay, endTime, trigger };
 }
