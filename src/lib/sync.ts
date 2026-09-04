@@ -1,4 +1,22 @@
-/** Pull projects + monitors from Promptwatch into the local database. Mirrors sync.py. */
+/** Pull projects + monitors from Promptwatch into the local database. Mirrors sync.py.
+ *
+ * Our own DB is the persisted inventory of managed monitors, not Promptwatch's
+ * `/monitors` list — that endpoint only ever returns active monitors, so
+ * treating it as the inventory would mean a monitor silently drops out of
+ * scheduling/management the moment it's turned off. Instead this runs in two
+ * separate passes:
+ *   1. Discovery — find monitor IDs we don't have a row for yet (via the
+ *      active list and via /prompts, which isn't filtered by active status)
+ *      and add them.
+ *   2. Refresh — for every monitor already in our DB, regardless of how it
+ *      was discovered or its current active status, fetch its current record
+ *      directly by ID and update it. This is sync's main job on every run
+ *      after the first: keep each persisted monitor's active/tick state
+ *      current, not rediscover which monitors exist.
+ * A monitor's row is never deleted here, even on a 404 from Promptwatch —
+ * it's marked stale instead, so a transient lookup failure (or an actual
+ * upstream deletion) never silently destroys its local history or schedule
+ * eligibility. */
 import { prisma } from "./db";
 import { Prisma } from "@prisma/client";
 import { ApiError, PromptwatchClient, PromptwatchMonitor } from "./promptwatch";
@@ -34,9 +52,8 @@ export async function runSync(actor = "System") {
     return { summary: null, error: apiErr.message };
   }
 
-  const seenIds = new Set<string>();
   const errors: string[] = [];
-  let monitorCount = 0;
+  let discoveredCount = 0;
 
   // Upsert rather than wipe-and-recreate: schedule blocks hang off Project
   // with onDelete: Cascade, so deleting projects here would silently destroy
@@ -65,110 +82,122 @@ export async function runSync(actor = "System") {
     await log("warn", "sync", `${goneIds.length} project(s) no longer exist upstream — removed with their schedules`, { user: actor });
   }
 
+  // --- Pass 1: discovery — add monitor IDs we've never seen before. ---
+  const existingIds = new Set((await prisma.monitor.findMany({ select: { id: true } })).map((m) => m.id));
+
   for (const project of projects) {
-    let remote: PromptwatchMonitor[] = [];
+    let active: PromptwatchMonitor[] = [];
     try {
-      remote = await client.listMonitors(project.id);
+      active = await client.listMonitors(project.id);
     } catch (err) {
       const apiErr = err as ApiError;
       errors.push(`${project.name}: ${apiErr.message}`);
     }
-
-    for (const item of remote) {
-      seenIds.add(item.id);
-      // The list endpoint above (GET /monitors) can return an abbreviated
-      // "name" for a monitor compared to its own single-record endpoint —
-      // e.g. two Promptwatch monitors that look identically named here even
-      // though one is really "X" and the other "X - 0 monitor". Re-fetch the
-      // full record so the name (and every other field) always comes from
-      // the authoritative source, the same way discovered monitors already
-      // do a few lines below. Falls back to the list item if that fails, so
-      // a single bad monitor can't stall the whole sync.
-      let full = item;
-      try {
-        full = await client.getMonitor(project.id, item.id);
-      } catch (err) {
-        const apiErr = err as ApiError;
-        errors.push(`${project.name} (monitor ${item.id} detail fetch): ${apiErr.message}`);
-      }
-      await prisma.monitor.upsert({
-        where: { id: item.id },
-        create: { id: item.id, projectId: project.id, projectName: project.name, seenAt: new Date(), ...monitorData(full) } as Prisma.MonitorUncheckedCreateInput,
-        update: { projectId: project.id, projectName: project.name, seenAt: new Date(), nextRetryAt: null, ...monitorData(full) },
-      });
-      monitorCount++;
+    for (const item of active) {
+      if (existingIds.has(item.id)) continue;
+      await createMonitor(client, project.id, project.name, item.id, item, errors);
+      existingIds.add(item.id);
+      discoveredCount++;
     }
 
-    // /monitors only returns active monitors. /prompts isn't filtered by monitor
-    // status, so every prompt's owning monitor reveals an inactive one too.
-    let discovered = new Map<string, string | undefined>();
+    // /monitors only returns active monitors. /prompts isn't filtered by
+    // monitor status, so every prompt's owning monitor reveals an inactive
+    // one too — this is what lets a never-before-seen inactive monitor get
+    // discovered at all.
+    let seenInPrompts = new Map<string, string | undefined>();
     try {
-      discovered = await client.iterProjectMonitorIds(project.id);
+      seenInPrompts = await client.iterProjectMonitorIds(project.id);
     } catch (err) {
       const apiErr = err as ApiError;
       errors.push(`${project.name} (inactive monitor discovery): ${apiErr.message}`);
     }
-
-    for (const monitorId of discovered.keys()) {
-      if (seenIds.has(monitorId)) continue;
-      let item: PromptwatchMonitor;
-      try {
-        item = await client.getMonitor(project.id, monitorId);
-      } catch (err) {
-        const apiErr = err as ApiError;
-        if (apiErr.status === 404 || apiErr.code === "MONITOR_NOT_FOUND") continue;
-        errors.push(`${project.name} (monitor ${monitorId}): ${apiErr.message}`);
-        continue;
+    for (const monitorId of seenInPrompts.keys()) {
+      if (existingIds.has(monitorId)) continue;
+      const ok = await createMonitor(client, project.id, project.name, monitorId, null, errors);
+      if (ok) {
+        existingIds.add(monitorId);
+        discoveredCount++;
       }
-      seenIds.add(monitorId);
-      await prisma.monitor.upsert({
-        where: { id: monitorId },
-        create: { id: monitorId, projectId: project.id, projectName: project.name, seenAt: new Date(), ...monitorData(item) } as Prisma.MonitorUncheckedCreateInput,
-        update: { projectId: project.id, projectName: project.name, seenAt: new Date(), nextRetryAt: null, ...monitorData(item) },
-      });
-      monitorCount++;
     }
   }
 
-  // A monitor can fall out of both /monitors and /prompts (e.g. zero prompts left).
-  // Re-read anything we already knew about but didn't see this pass, rather than
-  // silently dropping it from the dashboard.
-  const known = await prisma.monitor.findMany({ where: { id: { notIn: [...seenIds] } } });
+  // --- Pass 2: refresh — every already-persisted monitor, by ID, regardless
+  // of discovery source or current active status. This is what keeps a
+  // monitor's active/tick state current after it's been turned off, instead
+  // of it falling out of sync the moment it stops appearing in the active
+  // list. Never deletes a row — a 404 just marks it stale. ---
+  const known = await prisma.monitor.findMany();
+  let refreshedCount = 0;
+
   for (const monitor of known) {
     try {
       const item = await client.getMonitor(monitor.projectId, monitor.id);
       await prisma.monitor.update({
         where: { id: monitor.id },
-        data: { seenAt: new Date(), ...monitorData(item) },
+        data: { seenAt: new Date(), staleSince: null, ...monitorData(item) },
       });
-      monitorCount++;
+      refreshedCount++;
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.status === 404 || apiErr.code === "MONITOR_NOT_FOUND") {
-        await prisma.monitor.delete({ where: { id: monitor.id } }).catch(() => {});
-        await log("warn", "sync", `Monitor '${monitor.name}' no longer exists — removed`);
+        if (!monitor.staleSince) {
+          await log(
+            "warn", "sync",
+            `Monitor '${monitor.name}' not found on Promptwatch (may have been deleted there) — kept locally, marked stale`,
+            { monitorId: monitor.id, projectId: monitor.projectId, user: actor }
+          );
+        }
+        await prisma.monitor.update({ where: { id: monitor.id }, data: { staleSince: monitor.staleSince ?? new Date() } });
         continue;
       }
+      errors.push(`${monitor.projectName} (monitor ${monitor.name} refresh): ${apiErr.message}`);
       await prisma.monitor.update({
         where: { id: monitor.id },
-        data: { seenAt: new Date(), staleSince: monitor.staleSince ?? new Date() },
+        data: { staleSince: monitor.staleSince ?? new Date() },
       });
-      monitorCount++;
     }
   }
 
-  // Schedule blocks are cascade-deleted with their project above, so there's
-  // nothing to prune here any more.
   await prisma.settings.update({ where: { id: 1 }, data: { lastSyncAt: new Date() } });
 
+  const monitorCount = discoveredCount + refreshedCount;
   const summary = { projects: projects.length, monitors: monitorCount, errors };
   const level = errors.length ? "warn" : "success";
   await log(
     level,
     "sync",
-    `Synced ${projects.length} project(s), ${monitorCount} monitor(s)` +
-      (errors.length ? ` — ${errors.length} project error(s)` : ""),
+    `Synced ${projects.length} project(s) — ${discoveredCount} new monitor(s) discovered, ${refreshedCount} refreshed` +
+      (errors.length ? ` — ${errors.length} error(s)` : ""),
     { user: actor }
   );
   return { summary, error: null };
+}
+
+/** Fetches the full record for a newly-discovered monitor (the list/prompts
+ * endpoints can carry an abbreviated record) and creates its row. Returns
+ * whether it succeeded, so discovery can skip counting/marking it on failure. */
+async function createMonitor(
+  client: PromptwatchClient,
+  projectId: string,
+  projectName: string,
+  monitorId: string,
+  fallback: PromptwatchMonitor | null,
+  errors: string[]
+): Promise<boolean> {
+  let item = fallback;
+  try {
+    item = await client.getMonitor(projectId, monitorId);
+  } catch (err) {
+    const apiErr = err as ApiError;
+    if (!item) {
+      if (apiErr.status === 404 || apiErr.code === "MONITOR_NOT_FOUND") return false; // never existed long enough to fetch
+      errors.push(`${projectName} (monitor ${monitorId}): ${apiErr.message}`);
+      return false;
+    }
+    errors.push(`${projectName} (monitor ${monitorId} detail fetch): ${apiErr.message}`);
+  }
+  await prisma.monitor.create({
+    data: { id: monitorId, projectId, projectName, seenAt: new Date(), ...monitorData(item!) } as Prisma.MonitorUncheckedCreateInput,
+  });
+  return true;
 }

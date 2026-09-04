@@ -287,6 +287,16 @@ textarea.input{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;resize:ve
 .toast.err{background:var(--err)}
 .toast.ok{background:var(--ok)}
 
+/* loading overlay — for actions that take real server time (sync, etc.) */
+.loading-overlay{position:fixed;inset:0;background:rgba(24,21,17,.35);display:flex;
+  align-items:center;justify-content:center;z-index:80}
+.loading-box{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:28px 36px;box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;gap:12px}
+.loading-box span{font-size:13px;font-weight:600;color:var(--ink)}
+.spinner{width:32px;height:32px;color:var(--ink);animation:spin .8s linear infinite}
+.spinner circle{stroke:currentColor;stroke-linecap:round;stroke-dasharray:44;stroke-dashoffset:30}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* login */
 #loginScreen{z-index:100;background:linear-gradient(160deg,#eaf5ee,#fdfbf7)}
 .login-box{max-width:340px}

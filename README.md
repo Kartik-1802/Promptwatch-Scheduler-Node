@@ -125,6 +125,23 @@ Postgres database works too — the app just needs `DATABASE_URL` pointing at it
 Once it's live, invite additional people from **Team** in the app itself (super admin only) —
 that's separate from GitHub access, and controls who can log into the running app.
 
+### Carrying over an existing monitor inventory
+
+A fresh deploy starts with an empty database — normally that's fine, since setting the API key
+and hitting **Sync** in Settings rediscovers every monitor from Promptwatch on its own (including
+inactive ones — see `src/lib/sync.ts`'s two-pass discover/refresh design). If you'd rather not
+wait on that, `db/seed/monitors-seed.sql` is a point-in-time export of just the `Project` and
+`Monitor` tables (no API key, no users, no schedules) that can be applied to a fresh database
+before or after the first Sync — every row uses `ON CONFLICT DO NOTHING`, so it's safe to run
+more than once and won't clobber anything Sync has already fetched:
+
+```bash
+psql "$DATABASE_URL" -f db/seed/monitors-seed.sql
+```
+
+It's a snapshot, not a live feed — run Sync afterward (or just let the worker's next tick happen)
+to refresh every monitor's actual current active/inactive state from Promptwatch.
+
 ## Roles
 
 Enforced on the server for every action, not just hidden in the interface:

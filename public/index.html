@@ -281,6 +281,15 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<!-- Generic overlay for actions that take real server time (sync, etc.) —
+     shown via showLoading()/hideLoading() in app.js. -->
+<div id="loadingOverlay" class="loading-overlay hidden" role="status" aria-live="polite">
+  <div class="loading-box">
+    <svg class="spinner" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke-width="2.5"/></svg>
+    <span id="loadingText">Loading…</span>
+  </div>
+</div>
+
 <!-- Schedule editor: manage a monitor's (or bulk selection's) time blocks.
      Structure mirrors the time-block-scheduler reference: a start day+time
      and end day+time form (not a day-of-week checkbox picker), a live

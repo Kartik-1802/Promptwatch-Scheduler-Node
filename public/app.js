@@ -36,6 +36,14 @@ async function api(path, options = {}) {
   return data;
 }
 
+function showLoading(text = "Loading…") {
+  $("#loadingText").textContent = text;
+  $("#loadingOverlay").classList.remove("hidden");
+}
+function hideLoading() {
+  $("#loadingOverlay").classList.add("hidden");
+}
+
 let toastTimer;
 function toast(message, kind = "ok") {
   const node = $("#toast");
@@ -64,6 +72,15 @@ function monitorsInScope(projectId) {
 
 function currentProject() {
   return activeProjectId ? state.projects.find((p) => p.id === activeProjectId) || null : null;
+}
+
+/** Projects with zero monitors have nothing to schedule or manage — mostly
+ * empty duplicates from Promptwatch's side — so they're left out of the
+ * projects list and its counts. They're still selectable from "Add by ID"
+ * (that's the one place you'd want an otherwise-empty project), since that
+ * reads from state.projects directly rather than this filtered view. */
+function manageableProjects() {
+  return state.projects.filter((p) => p.monitorCount > 0);
 }
 
 /** Icon helper — inline SVG rather than emoji, per the UI/UX rules. */
@@ -98,8 +115,8 @@ function renderStats() {
         [project.desiredActive === null ? "Manual" : (project.inWindow ? "In window" : "Outside window"), "right now"],
       ]
     : [
-        [state.projects.filter((p) => p.blocks.length > 0).length, "projects scheduled"],
-        [state.projects.length, "projects"],
+        [manageableProjects().filter((p) => p.blocks.length > 0).length, "projects scheduled"],
+        [manageableProjects().length, "projects"],
       ];
   chips.forEach(([value, label]) => {
     const chip = el("div", "stat-chip");
@@ -140,8 +157,8 @@ function renderProjects() {
   const term = $("#projectSearch").value.trim().toLowerCase();
   list.innerHTML = "";
 
-  const visible = state.projects.filter((p) => !term || p.name.toLowerCase().includes(term));
-  $("#emptyProjects").classList.toggle("hidden", state.projects.length > 0);
+  const visible = manageableProjects().filter((p) => !term || p.name.toLowerCase().includes(term));
+  $("#emptyProjects").classList.toggle("hidden", manageableProjects().length > 0);
 
   const liveIds = new Set(visible.map((p) => p.id));
   [...selectedProjects].forEach((id) => { if (!liveIds.has(id)) selectedProjects.delete(id); });
@@ -966,13 +983,14 @@ $("#syncBtn").onclick = async () => {
   const button = $("#syncBtn");
   const label = button.querySelector("span");
   button.disabled = true; if (label) label.textContent = "Syncing…";
+  showLoading("Syncing with Promptwatch…");
   try {
     const res = await api("/api/sync", { method: "POST" });
     apply(res.state);
     const { projects, monitors, errors } = res.summary;
     toast(`Synced ${projects} project(s), ${monitors} monitor(s)`, errors.length ? "err" : "ok");
   } catch (err) { toast(err.message, "err"); }
-  finally { button.disabled = false; if (label) label.textContent = "Sync"; }
+  finally { button.disabled = false; if (label) label.textContent = "Sync"; hideLoading(); }
 };
 
 $("#addByIdBtn").onclick = () => {
