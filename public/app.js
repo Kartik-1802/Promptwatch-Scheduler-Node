@@ -94,6 +94,52 @@ function icon(path, cls = "ico") {
   svg.append(p);
   return svg;
 }
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Reference one of the inline <symbol> icons defined at the top of
+ * index.html. Both href and xlink:href are set so older Safari resolves it. */
+function useIcon(id, cls = "ico") {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#${id}`);
+  use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", `#${id}`);
+  svg.append(use);
+  return svg;
+}
+
+/** One card in the KPI strip at the top of a page. `meter` (0-1) draws the
+ * progress bar in the footer instead of a plain left label. */
+function kpiCard({ eyebrow, badge, value, unit, footLeft, footRight, meter }) {
+  const card = el("div", "kpi");
+
+  const top = el("div", "kpi-top");
+  top.append(el("span", "eyebrow", eyebrow));
+  if (badge) top.append(el("span", `badge ${badge.tone || ""}`.trim(), badge.text));
+  card.append(top);
+
+  const val = el("div", "kpi-value");
+  val.append(el("b", null, String(value)));
+  if (unit) val.append(el("span", null, unit));
+  card.append(val);
+
+  const foot = el("div", "kpi-foot");
+  if (meter !== undefined) {
+    const track = el("div", "meter");
+    const fill = el("i");
+    fill.style.width = `${Math.round(meter * 100)}%`;
+    track.append(fill);
+    foot.append(track);
+  } else if (footLeft) {
+    foot.append(el("span", null, footLeft));
+  }
+  if (footRight) foot.append(el("span", "mono", footRight));
+  card.append(foot);
+
+  return card;
+}
+
 const ICON_CHEVRON = "M9.4 18.4 8 17l5-5-5-5 1.4-1.4L15.8 12z";
 const ICON_CLOCK = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3 1-1.7-4-2.1Z";
 const ICON_TRASH = "M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1 12H7L6 9Z";
@@ -102,27 +148,76 @@ function renderStats() {
   const project = currentProject();
   const monitors = monitorsInScope(activeProjectId);
   const activeCount = monitors.filter((m) => m.active).length;
+  const ratio = monitors.length ? activeCount / monitors.length : 0;
+  const pct = `${Math.round(ratio * 100)}%`;
 
-  const primary = $("#statPrimary");
-  primary.innerHTML = "";
-  primary.append(el("b", null, `${activeCount}/${monitors.length}`), el("span", null, "monitors on"));
+  const block = $("#statsBlock");
+  block.innerHTML = "";
 
-  const secondary = $("#statSecondary");
-  secondary.innerHTML = "";
-  const chips = project
-    ? [
-        [project.blocks.length, project.blocks.length === 1 ? "time block" : "time blocks"],
-        [project.desiredActive === null ? "Manual" : (project.inWindow ? "In window" : "Outside window"), "right now"],
-      ]
-    : [
-        [manageableProjects().filter((p) => p.blocks.length > 0).length, "projects scheduled"],
-        [manageableProjects().length, "projects"],
-      ];
-  chips.forEach(([value, label]) => {
-    const chip = el("div", "stat-chip");
-    chip.append(el("b", null, String(value)), el("span", null, label));
-    secondary.append(chip);
-  });
+  const stateBadge = monitors.length === 0
+    ? { text: "No monitors", tone: "off" }
+    : activeCount === 0
+      ? { text: "All off", tone: "off" }
+      : activeCount === monitors.length
+        ? { text: "All on", tone: "on" }
+        : { text: `${activeCount} on`, tone: "brand" };
+
+  block.append(kpiCard({
+    eyebrow: project ? "Active monitors" : "Active workload",
+    badge: stateBadge,
+    value: activeCount,
+    unit: `/ ${monitors.length} ${monitors.length === 1 ? "monitor" : "monitors"}`,
+    meter: ratio,
+    footRight: pct,
+  }));
+
+  if (project) {
+    const next = project.nextTransition;
+    block.append(kpiCard({
+      eyebrow: "Time blocks",
+      value: project.blocks.length,
+      unit: project.blocks.length === 1 ? "scheduled block" : "scheduled blocks",
+      footLeft: project.blocks.length ? "Next change" : "Nothing scheduled",
+      footRight: next
+        ? `${next.to === "active" ? "ON" : "OFF"} ${new Date(next.at).toLocaleString([], {
+            weekday: "short", hour: "2-digit", minute: "2-digit" })}`
+        : "—",
+    }));
+    block.append(kpiCard({
+      eyebrow: "Dispatch mode",
+      badge: project.desiredActive === null
+        ? { text: "On demand", tone: "off" }
+        : { text: project.inWindow ? "In window" : "Outside window", tone: project.inWindow ? "on" : "warnb" },
+      value: project.desiredActive === null ? "Manual" : (project.inWindow ? "Scheduled on" : "Scheduled off"),
+      unit: "right now",
+      footLeft: project.desiredActive === null ? "Needs an operator" : "Driven by the schedule",
+    }));
+  } else {
+    const projects = manageableProjects();
+    const scheduled = projects.filter((p) => p.blocks.length > 0);
+    const soonest = scheduled
+      .map((p) => p.nextTransition)
+      .filter(Boolean)
+      .sort((a, b) => new Date(a.at) - new Date(b.at))[0];
+    block.append(kpiCard({
+      eyebrow: "Scheduled",
+      badge: scheduled.length ? { text: "Automated", tone: "on" } : { text: "Manual", tone: "off" },
+      value: scheduled.length,
+      unit: `/ ${projects.length} ${projects.length === 1 ? "project" : "projects"}`,
+      footLeft: soonest ? "Next window" : "No windows set",
+      footRight: soonest
+        ? `${soonest.to === "active" ? "ON" : "OFF"} ${new Date(soonest.at).toLocaleString([], {
+            weekday: "short", hour: "2-digit", minute: "2-digit" })}`
+        : "—",
+    }));
+    block.append(kpiCard({
+      eyebrow: "Inventory",
+      value: projects.length,
+      unit: projects.length === 1 ? "project tracked" : "projects tracked",
+      footLeft: "Monitors discovered",
+      footRight: String(state.monitors.length),
+    }));
+  }
 }
 
 // ---------- schedule summary (shared by project rows + project header) ----------
@@ -197,6 +292,7 @@ function renderProjects() {
 
     const actions = el("div", "prow-actions");
     const sched = el("button", "btn primary", p.blocks.length ? "Edit schedule" : "Add schedule");
+    sched.prepend(useIcon("i-calendar"));
     sched.disabled = !canMutate();
     sched.onclick = () => openEditor(p);
     actions.append(sched);
@@ -230,8 +326,9 @@ function openProject(id) {
   $("#projectView").classList.remove("hidden");
   const project = state.projects.find((p) => p.id === id);
   const name = project ? project.name : "Project";
-  $("#projectViewTitle").textContent = name;
+  $("#pageEyebrow").textContent = "Project";
   $("#pageTitle").textContent = name;
+  $("#crumbHere").textContent = name;
   $("#pageSub").textContent = "This project's schedule drives every monitor below.";
   renderStats();
   renderProjectScheduleBar();
@@ -244,7 +341,9 @@ function backToProjects() {
   $("#crumbs").classList.add("hidden");
   $("#projectView").classList.add("hidden");
   $("#projectsView").classList.remove("hidden");
+  $("#pageEyebrow").textContent = "Hub control plane";
   $("#pageTitle").textContent = "Projects";
+  $("#crumbHere").textContent = "Monitor & Scheduler Hub";
   $("#pageSub").textContent = "Every project and its schedule. Open one to see its monitors.";
   renderStats();
   renderProjects();
@@ -259,15 +358,24 @@ function renderProjectScheduleBar() {
   if (!project) return;
 
   const left = el("div", "psb-left");
+  const iconWrap = el("div", "psb-icon");
+  iconWrap.append(useIcon("i-clock"));
+  left.append(iconWrap);
+
+  const body = el("div", "psb-body");
   const head = el("div", "psb-head");
-  head.append(icon(ICON_CLOCK, "ico"));
   head.append(el("span", null, "Project schedule"));
   head.append(scheduleStateBadge(project));
-  left.append(head);
-  left.append(scheduleSummary(project));
+  body.append(head);
+  body.append(el("p", "psb-hint",
+    `Applies to all ${project.monitorCount} monitor${project.monitorCount === 1 ? "" : "s"} in this project. ` +
+    "Blocks can't overlap or touch each other."));
+  body.append(scheduleSummary(project));
+  left.append(body);
   bar.append(left);
 
   const btn = el("button", "btn primary", project.blocks.length ? "Edit schedule" : "Add schedule");
+  btn.prepend(useIcon("i-calendar"));
   btn.disabled = !canMutate();
   btn.onclick = () => openEditor(project);
   bar.append(btn);
@@ -331,12 +439,29 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   const lead = el("div", "lead");
   const name = el("div", "mname");
   name.append(el("span", null, m.name));
+  name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Idle"));
   if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
   lead.append(name);
-  const bits = [m.projectName, `${m.promptCount ?? 0} prompts`, `${(m.models || []).length} models`];
-  if (m.countryCode) bits.push(`${m.countryCode}/${m.languageCode || "—"}`);
-  lead.append(el("div", "meta", bits.join(" · ")));
+
+  const meta = el("div", "meta");
+  meta.append(el("span", "strong", m.projectName));
+  meta.append(el("span", null, `${m.promptCount ?? 0} prompts`));
+  meta.append(el("span", null, `${(m.models || []).length} models`));
+  if (m.countryCode) meta.append(el("span", "tag", `${m.countryCode}/${m.languageCode || "—"}`));
+  lead.append(meta);
   row.append(lead);
+
+  // Cadence comes from the monitor's project — scheduling is only ever done at
+  // project level, so this just reports which project rule drives this row.
+  const project = state.projects.find((p) => p.id === m.projectId);
+  const cadence = el("div", "mrow-cadence");
+  if (project && project.blocks.length) {
+    cadence.append(el("span", "mono", `${project.blocks.length} time block${project.blocks.length === 1 ? "" : "s"}`));
+    cadence.append(el("span", null, project.inWindow ? "In window now" : "Outside window"));
+  } else {
+    cadence.append(el("span", "mono", "Manual trigger"));
+  }
+  row.append(cadence);
 
   const toggleWrap = el("div", "toggle-wrap");
   const stateLabel = el("span", `toggle-state ${m.active ? "on" : "off"}`, m.active ? "ON" : "OFF");
@@ -358,6 +483,25 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   toggleWrap.append(stateLabel, toggle);
   row.append(toggleWrap);
 
+  const delBtn = el("button", "iconbtn danger");
+  delBtn.title = `Remove ${m.name} from tracking`;
+  delBtn.setAttribute("aria-label", `Remove ${m.name} from tracking`);
+  delBtn.append(useIcon("i-trash"));
+  delBtn.disabled = !canMutate();
+  delBtn.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Stop tracking '${m.name}' locally? It reappears on the next sync if it's still active ` +
+      "or has prompts upstream on Promptwatch — this only clears it from this dashboard.")) return;
+    delBtn.disabled = true;
+    try {
+      const res = await api(`/api/monitors/${m.id}`, { method: "DELETE" });
+      selectedSet.delete(m.id);
+      apply(res.state);
+      toast(`Removed '${m.name}'`);
+    } catch (err) { toast(err.message, "err"); delBtn.disabled = !canMutate(); }
+  };
+  row.append(delBtn);
+
   return row;
 }
 
@@ -374,9 +518,36 @@ function renderAllMonitors() {
     return `${m.name} ${m.projectName}`.toLowerCase().includes(term);
   });
 
-  const primary = $("#allMonStatPrimary");
-  primary.innerHTML = "";
-  primary.append(el("b", null, `${state.monitors.filter((m) => m.active).length}/${state.monitors.length}`), el("span", null, "monitors on"));
+  const activeCount = state.monitors.filter((m) => m.active).length;
+  const total = state.monitors.length;
+  const scheduledProjects = state.projects.filter((p) => p.blocks.length > 0);
+  const scheduledMonitors = state.monitors.filter((m) =>
+    scheduledProjects.some((p) => p.id === m.projectId)).length;
+
+  const statsBlock = $("#allMonStatsBlock");
+  statsBlock.innerHTML = "";
+  statsBlock.append(kpiCard({
+    eyebrow: "Operational state",
+    badge: activeCount ? { text: `${activeCount} on`, tone: "on" } : { text: "All off", tone: "off" },
+    value: activeCount,
+    unit: `/ ${total} ${total === 1 ? "monitor" : "monitors"}`,
+    meter: total ? activeCount / total : 0,
+    footRight: `${total ? Math.round((activeCount / total) * 100) : 0}%`,
+  }));
+  statsBlock.append(kpiCard({
+    eyebrow: "Scheduled cadence",
+    value: scheduledMonitors,
+    unit: scheduledMonitors === 1 ? "monitor windowed" : "monitors windowed",
+    footLeft: "On manual trigger",
+    footRight: String(total - scheduledMonitors),
+  }));
+  statsBlock.append(kpiCard({
+    eyebrow: "Coverage",
+    value: state.projects.filter((p) => p.monitorCount > 0).length,
+    unit: "projects linked",
+    footLeft: "Showing here",
+    footRight: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+  }));
 
   const list = $("#allMonitorList");
   list.innerHTML = "";
@@ -417,11 +588,14 @@ async function allMonBulkSetActive(active) {
 
 function renderTop() {
   const on = state.settings.schedulerEnabled && state.settings.hasApiKey;
-  const label = on
-    ? `Automation on · last check ${fmtTime(state.lastTickAt)}`
-    : (state.settings.hasApiKey ? "Automation paused" : "No API key");
-  $("#tickLabel").textContent = label;
-  $("#tickState .dot").classList.toggle("off", !on);
+
+  // The sidebar's cron-engine card is the only place automation status shows.
+  $("#cronStateLabel").textContent = on ? "RUNNING" : (state.settings.hasApiKey ? "PAUSED" : "NO KEY");
+  $("#cronStatePill").className = `pill${on ? "" : " off"}`;
+  $("#cronInterval").textContent = `${state.settings.tickSeconds}s`;
+
+  const count = state.monitors.length;
+  $("#navMonitorCount").textContent = count ? String(count) : "";
 }
 
 function renderSettings() {
@@ -449,8 +623,8 @@ function apply(next) {
   applyRoleUI();
 }
 
-const MUTATE_BUTTON_IDS = ["syncBtn", "runNow", "addByIdBtn", "adoptSave",
-  "bulkActivate", "bulkDeactivate", "allMonBulkActivate", "allMonBulkDeactivate",
+const MUTATE_BUTTON_IDS = ["syncBtn", "addByIdBtn", "adoptSave", "allMonAddByIdBtn", "allMonAdoptSave",
+  "bulkActivate", "bulkDeactivate", "bulkRemove", "allMonBulkActivate", "allMonBulkDeactivate", "allMonBulkRemove",
   "projectBulkActivate", "projectBulkDeactivate", "projectBulkSchedule", "projectBulkClearSchedule"];
 const SETTINGS_INPUT_IDS = ["apiKey", "saveKey", "testKey", "clearKey",
   "timezone", "tickSeconds", "schedulerEnabled", "saveScheduler"];
@@ -511,11 +685,17 @@ async function loadLogs() {
     const row = el("div", "logrow");
     const msgClass = entry.kind === "activate" ? "msg activate"
       : entry.kind === "deactivate" ? "msg deactivate" : "msg";
+    const who = entry.user || "System";
+    const actor = el("span", "user");
+    const avatar = el("span", `uav${entry.user ? "" : " sys"}`, who[0].toUpperCase());
+    actor.append(avatar, el("span", null, who));
+    actor.title = who;
+
     row.append(
       el("span", "t", new Date(entry.ts * 1000).toLocaleString([], {
         month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })),
       el("span", `lv ${entry.level}`, entry.level),
-      el("span", "user", entry.user || "System"),
+      actor,
       el("span", msgClass, entry.message));
     list.append(row);
   });
@@ -746,11 +926,12 @@ async function loadTeam() {
     const row = el("div", "team-row");
 
     const lead = el("div", "lead");
+    lead.append(el("div", "avatar", (u.email[0] || "?").toUpperCase()));
+    const who = el("div", "who");
     const emailLine = el("div", "email");
     emailLine.append(el("span", null, u.email));
     emailLine.append(el("span", `role ${u.role}`, u.role));
     if (!u.active) emailLine.append(el("span", "badge off", "Deactivated"));
-    lead.append(emailLine);
     // createdAt/lastLoginAt come from src/lib/auth.ts's publicUser() as ISO
     // strings (unlike the epoch-seconds timestamps used elsewhere in this
     // app) — Date must be given the string directly, not string*1000.
@@ -758,7 +939,9 @@ async function loadTeam() {
     const lastLogin = u.lastLoginAt
       ? new Date(u.lastLoginAt).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })
       : "never";
-    lead.append(el("div", "meta", `Added ${created} · Last login ${lastLogin}`));
+    who.append(emailLine);
+    who.append(el("div", "meta", `Added ${created} · Last login ${lastLogin}`));
+    lead.append(who);
     row.append(lead);
 
     const roleSelect = el("select", "input");
@@ -869,6 +1052,17 @@ function showLogin() {
 function showApp() {
   $("#loginScreen").classList.add("hidden");
   $("#appShell").classList.remove("hidden");
+  renderIdentity();
+}
+
+/** The signed-in account, shown at the foot of the sidebar. */
+function renderIdentity() {
+  const email = session ? session.email : "";
+  const name = email ? email.split("@")[0] : "—";
+  $("#userInitial").textContent = (email[0] || "?").toUpperCase();
+  $("#userName").textContent = name;
+  $("#userEmail").textContent = email || "not signed in";
+  $("#userEmail").title = email || "";
 }
 
 $("#loginBtn").onclick = async () => {
@@ -891,18 +1085,55 @@ $("#logoutBtn").onclick = async () => {
 };
 
 // ---------- wiring ----------
+/** Header copy for each tab. The Projects tab is special-cased: when a project
+ * is open its own name and subtitle stay in place. */
+const TAB_HEADERS = {
+  allmonitors: ["Surveillance control", "Monitors",
+    "Every monitor across every project. Scheduling stays on the Projects tab."],
+  logs: ["Activity", "Logs",
+    "Execution history across scheduler runs, syncs and manual overrides."],
+  settings: ["System config", "Settings",
+    "API credentials, scheduler cadence and upstream usage."],
+  team: ["Access control", "Team",
+    "Who can sign in, and what each of them is allowed to change."],
+};
+
+function applyTabHeader(name) {
+  if (name === "monitors") {
+    activeProjectId === null ? backToProjects() : openProject(activeProjectId);
+    return;
+  }
+  const [eyebrow, title, sub] = TAB_HEADERS[name];
+  $("#pageEyebrow").textContent = eyebrow;
+  $("#pageTitle").textContent = title;
+  $("#crumbHere").textContent = title;
+  $("#pageSub").textContent = sub;
+}
+
+/** Switches to a sidebar tab — shared by the tab buttons' own click
+ * handlers and the logo's "go home" link, so both stay in lockstep. */
+function activateTab(name) {
+  document.querySelectorAll(".side-btn[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  ["monitors", "allmonitors", "logs", "settings", "team"].forEach((n) =>
+    $(`#tab-${n}`).classList.toggle("hidden", n !== name));
+  applyTabHeader(name);
+  if (name === "allmonitors") renderAllMonitors();
+  if (name === "logs") loadLogs();
+  if (name === "settings") loadUsage();
+  if (name === "team") { renderInviteRoleOptions(); loadTeam(); }
+}
+
 document.querySelectorAll(".side-btn[data-tab]").forEach((tab) => {
-  tab.onclick = () => {
-    document.querySelectorAll(".side-btn[data-tab]").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    ["monitors", "allmonitors", "logs", "settings", "team"].forEach((name) =>
-      $(`#tab-${name}`).classList.toggle("hidden", name !== tab.dataset.tab));
-    if (tab.dataset.tab === "allmonitors") renderAllMonitors();
-    if (tab.dataset.tab === "logs") loadLogs();
-    if (tab.dataset.tab === "settings") loadUsage();
-    if (tab.dataset.tab === "team") { renderInviteRoleOptions(); loadTeam(); }
-  };
+  tab.onclick = () => activateTab(tab.dataset.tab);
 });
+
+// Clicking the logo always returns to the Projects list — the dashboard
+// home — even if a project is currently open or another tab is active.
+$("#homeLink").onclick = (e) => {
+  e.preventDefault();
+  activeProjectId = null;
+  activateTab("monitors");
+};
 
 $("#projectSearch").oninput = renderProjects;
 $("#backToProjects").onclick = backToProjects;
@@ -950,6 +1181,21 @@ async function bulkSetActive(active) {
 $("#bulkActivate").onclick = () => bulkSetActive(true);
 $("#bulkDeactivate").onclick = () => bulkSetActive(false);
 
+async function bulkRemoveMonitors(selectedSet) {
+  if (!selectedSet.size) return;
+  const count = selectedSet.size;
+  if (!confirm(`Stop tracking ${count} monitor(s) locally? Any still active or prompted upstream ` +
+    "on Promptwatch reappear on the next sync — this only clears them from this dashboard.")) return;
+  try {
+    const res = await api("/api/monitors/remove-bulk", { method: "POST", body: { monitorIds: [...selectedSet] } });
+    selectedSet.clear();
+    apply(res.state);
+    toast(`Removed ${res.removed} monitor(s)`);
+  } catch (err) { toast(err.message, "err"); }
+}
+$("#bulkRemove").onclick = () => bulkRemoveMonitors(selectedMonitors);
+$("#allMonBulkRemove").onclick = () => bulkRemoveMonitors(selectedAllMonitors);
+
 // ---------- project-level bulk actions (Projects tab) ----------
 async function projectBulkSetActive(active) {
   if (!selectedProjects.size) return;
@@ -990,45 +1236,53 @@ $("#syncBtn").onclick = async () => {
     const { projects, monitors, errors } = res.summary;
     toast(`Synced ${projects} project(s), ${monitors} monitor(s)`, errors.length ? "err" : "ok");
   } catch (err) { toast(err.message, "err"); }
-  finally { button.disabled = false; if (label) label.textContent = "Sync"; hideLoading(); }
+  finally { button.disabled = false; if (label) label.textContent = "Sync now"; hideLoading(); }
 };
 
-$("#addByIdBtn").onclick = () => {
-  const select = $("#adoptProject");
-  select.innerHTML = state.projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
-  if (activeProjectId) select.value = activeProjectId;
-  $("#adoptRow").classList.toggle("hidden");
-};
-$("#adoptCancel").onclick = () => $("#adoptRow").classList.add("hidden");
-$("#adoptSave").onclick = async () => {
-  const ids = $("#adoptIds").value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-  if (!ids.length) return toast("Paste at least one monitor ID", "err");
-  try {
-    const res = await api("/api/monitors/adopt", { method: "POST", body: {
-      projectId: $("#adoptProject").value, monitorIds: ids }});
-    apply(res.state);
-    const failedCount = res.failed.length;
-    $("#adoptResult").textContent = failedCount
-      ? `Added ${res.added}, failed: ${res.failed.map((f) => f.id.slice(0, 8)).join(", ")}`
-      : "";
-    if (res.added) {
-      $("#adoptIds").value = failedCount ? res.failed.map((f) => f.id).join("\n") : "";
-      toast(`Added ${res.added} monitor(s)${failedCount ? `, ${failedCount} failed` : ""}`,
-        failedCount ? "err" : "ok");
-      if (!failedCount) $("#adoptRow").classList.add("hidden");
-    } else {
-      toast(`Could not add any monitors: ${res.failed[0]?.message || "unknown error"}`, "err");
-    }
-  } catch (err) { toast(err.message, "err"); }
-};
+/** Wires an "Add by ID" trigger + panel: one on the Projects tab's project
+ * view (defaults to the open project), and one on the flat Monitors tab
+ * (defaults to nothing — every project is a valid target there). Both hit
+ * the same /api/monitors/adopt endpoint; only which elements they read from
+ * differ. */
+function wireAdoptPanel({ triggerId, rowId, projectSelectId, idsId, resultId, cancelId, saveId }) {
+  $(`#${triggerId}`).onclick = () => {
+    const select = $(`#${projectSelectId}`);
+    select.innerHTML = state.projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+    if (activeProjectId) select.value = activeProjectId;
+    $(`#${rowId}`).classList.toggle("hidden");
+  };
+  $(`#${cancelId}`).onclick = () => $(`#${rowId}`).classList.add("hidden");
+  $(`#${saveId}`).onclick = async () => {
+    const ids = $(`#${idsId}`).value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    if (!ids.length) return toast("Paste at least one monitor ID", "err");
+    try {
+      const res = await api("/api/monitors/adopt", { method: "POST", body: {
+        projectId: $(`#${projectSelectId}`).value, monitorIds: ids }});
+      apply(res.state);
+      const failedCount = res.failed.length;
+      $(`#${resultId}`).textContent = failedCount
+        ? `Added ${res.added}, failed: ${res.failed.map((f) => f.id.slice(0, 8)).join(", ")}`
+        : "";
+      if (res.added) {
+        $(`#${idsId}`).value = failedCount ? res.failed.map((f) => f.id).join("\n") : "";
+        toast(`Added ${res.added} monitor(s)${failedCount ? `, ${failedCount} failed` : ""}`,
+          failedCount ? "err" : "ok");
+        if (!failedCount) $(`#${rowId}`).classList.add("hidden");
+      } else {
+        toast(`Could not add any monitors: ${res.failed[0]?.message || "unknown error"}`, "err");
+      }
+    } catch (err) { toast(err.message, "err"); }
+  };
+}
 
-$("#runNow").onclick = async () => {
-  try {
-    const res = await api("/api/scheduler/run", { method: "POST" });
-    apply(res.state);
-    toast(`Scheduler applied ${res.changes.length} change(s)`);
-  } catch (err) { toast(err.message, "err"); }
-};
+wireAdoptPanel({
+  triggerId: "addByIdBtn", rowId: "adoptRow", projectSelectId: "adoptProject",
+  idsId: "adoptIds", resultId: "adoptResult", cancelId: "adoptCancel", saveId: "adoptSave",
+});
+wireAdoptPanel({
+  triggerId: "allMonAddByIdBtn", rowId: "allMonAdoptRow", projectSelectId: "allMonAdoptProject",
+  idsId: "allMonAdoptIds", resultId: "allMonAdoptResult", cancelId: "allMonAdoptCancel", saveId: "allMonAdoptSave",
+});
 
 $("#saveKey").onclick = async () => {
   const key = $("#apiKey").value.trim();

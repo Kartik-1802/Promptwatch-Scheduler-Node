@@ -1,0 +1,1 @@
+/private/tmp/claude-502/-Users-contentninja-Downloads-Promptwatch-Scheduler-Node/6bd76cad-2dc8-45ab-8fd1-02d97d1b7876/scratchpad/pgtool/node_modules/@embedded-postgres/darwin-arm64/native/bin/postgres "-D" "/Users/contentninja/Downloads/Promptwatch Scheduler Node/data/pgdata" "-p" "5432"

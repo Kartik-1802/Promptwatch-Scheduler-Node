@@ -4,124 +4,193 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Promptwatch Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Outfit:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%230284C7' d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3 1-1.7-4-2.1Z'/></svg>">
 </head>
 <body>
+
+<!-- Inline icon sprite: every glyph in the UI is an SVG symbol, no icon font
+     and no emoji (see the project's UI/UX rules). -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-cn-mark" viewBox="0 0 24 24">
+    <g fill="#0EA5E9">
+      <path d="M12 12 12 3.2 16.4 7.6Z"/>
+      <path d="M12 12 20.8 12 16.4 16.4Z"/>
+      <path d="M12 12 12 20.8 7.6 16.4Z"/>
+      <path d="M12 12 3.2 12 7.6 7.6Z"/>
+    </g>
+  </symbol>
+  <symbol id="i-projects" viewBox="0 0 24 24"><path fill="currentColor" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
+  <symbol id="i-monitors" viewBox="0 0 24 24"><path fill="currentColor" d="M3 13h3l2-6 4 12 3-9 2 3h4v2h-5l-1-1.5L12 22 8 10l-1 3H3v-2Z"/></symbol>
+  <symbol id="i-logs" viewBox="0 0 24 24"><path fill="currentColor" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 4v2h10V7H7Zm0 4v2h10v-2H7Zm0 4v2h6v-2H7Z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M9.98 2.5h4.04l.54 2.6a7.5 7.5 0 0 1 1.65.96l2.5-.86 2.02 3.5-2.02 1.72q.09.53.09 1.08t-.09 1.08l2.02 1.72-2.02 3.5-2.5-.86a7.5 7.5 0 0 1-1.65.96l-.54 2.6H9.98l-.54-2.6a7.5 7.5 0 0 1-1.65-.96l-2.5.86-2.02-3.5 2.02-1.72A7 7 0 0 1 5.2 12q0-.55.09-1.08L3.27 9.2l2.02-3.5 2.5.86a7.5 7.5 0 0 1 1.65-.96l.54-2.6ZM12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/></symbol>
+  <symbol id="i-team" viewBox="0 0 24 24"><path fill="currentColor" d="M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 3c-3.3 0-6 1.6-6 4v2h12v-2c0-2.4-2.7-4-6-4Zm7 0c-.5 0-1 .03-1.5.1 1 .9 1.5 2 1.5 3.4v2h5v-1.5c0-2-2.2-4-5-4Z"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35A8 8 0 1 0 19.94 13h-2.02a6 6 0 1 1-1.6-6.02L13 10h7V3l-2.35 3.35Z"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path fill="currentColor" d="M10 3h6a2 2 0 0 1 2 2v3h-2V5h-6v14h6v-3h2v3a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.6 7H3v2h10.6l-2.3 2.3 1.4 1.4L17 12l-4.3-4.3-1.4 1.4 2.3 2.3Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm1 3h-2v6.2l4.6 2.8 1-1.7-3.6-2.1V7Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path fill="currentColor" d="M10 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm10.7 15.3-4.3-4.3-1.4 1.4 4.3 4.3 1.4-1.4Z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path fill="currentColor" d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path fill="currentColor" d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path fill="currentColor" d="M7 2v2h10V2h2v2h1a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V2h2ZM4 9v11h16V9H4Z"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path fill="currentColor" d="M15 3a6 6 0 0 0-5.7 7.9L2 18.2V22h3.8l1.4-1.4V19h1.8v-1.8h1.8l1.3-1.3A6 6 0 1 0 15 3Zm1.5 5.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><path fill="currentColor" d="M9 1h6v2H9V1Zm2 6h2v6h-2V7Zm1-3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path fill="currentColor" d="M4 20V10h4v10H4Zm6 0V4h4v16h-4Zm6 0v-7h4v7h-4Z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path fill="currentColor" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5Z"/></symbol>
+  <symbol id="i-invite" viewBox="0 0 24 24"><path fill="currentColor" d="M15 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5ZM5 8h2v3h3v2H7v3H5v-3H2v-2h3V8Z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 4 5v7c0 5 3.4 9 8 10 4.6-1 8-5 8-10V5l-8-3Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1 12H7L6 9Z"/></symbol>
+</svg>
+
 <div id="appShell" class="hidden">
 <div class="shell">
 
   <aside class="sidebar">
-    <div class="side-logo" aria-hidden="true">
-      <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3 1-1.7-4-2.1Z"/></svg>
+    <div>
+      <div class="side-head">
+        <a href="#" class="side-logo" id="homeLink" title="ContentNinja — back to Projects" aria-label="ContentNinja — back to Projects">
+          <svg class="mark"><use href="#i-cn-mark"></use></svg>
+          <b>Content<span>Ninja</span></b>
+        </a>
+      </div>
+
+      <nav class="side-nav">
+        <button class="side-btn active" data-tab="monitors" title="Projects">
+          <svg><use href="#i-projects"></use></svg><span>Projects</span>
+        </button>
+        <button class="side-btn" data-tab="allmonitors" title="Monitors">
+          <svg><use href="#i-monitors"></use></svg><span>Monitors</span>
+          <span class="side-count" id="navMonitorCount"></span>
+        </button>
+        <button class="side-btn" data-tab="logs" title="Logs">
+          <svg><use href="#i-logs"></use></svg><span>Logs</span>
+        </button>
+        <button class="side-btn" data-tab="settings" title="Settings">
+          <svg><use href="#i-settings"></use></svg><span>Settings</span>
+        </button>
+        <button class="side-btn hidden" data-tab="team" id="teamTabBtn" title="Team">
+          <svg><use href="#i-team"></use></svg><span>Team</span>
+        </button>
+      </nav>
     </div>
-    <nav class="side-nav">
-      <button class="side-btn active" data-tab="monitors" title="Projects">
-        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5v5H3V7Zm0 6h7v5H5a2 2 0 0 1-2-2v-3Zm9 5v-5h9v3a2 2 0 0 1-2 2h-7Zm0-7V5h7a2 2 0 0 1 2 2v4h-9Z"/></svg>
-        <span>Projects</span>
-      </button>
-      <button class="side-btn" data-tab="allmonitors" title="Monitors">
-        <svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9.3 3.1-11 7 1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
-        <span>Monitors</span>
-      </button>
-      <button class="side-btn" data-tab="logs" title="Logs">
-        <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4V5Zm0 6h16v2H4v-2Zm0 6h10v2H4v-2Z"/></svg>
-        <span>Logs</span>
-      </button>
-      <button class="side-btn" data-tab="settings" title="Settings">
-        <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm8.4 4a7.4 7.4 0 0 0-.13-1.36l2.11-1.65-2-3.46-2.49 1a7.6 7.6 0 0 0-2.36-1.36L15.1 2h-4l-.43 2.17a7.6 7.6 0 0 0-2.36 1.36l-2.49-1-2 3.46 2.11 1.65a7.4 7.4 0 0 0 0 2.72L3.82 14 5.8 17.5l2.49-1a7.6 7.6 0 0 0 2.36 1.36L11.1 20h4l.43-2.17a7.6 7.6 0 0 0 2.36-1.36l2.49 1 2-3.46-2.11-1.65c.09-.44.13-.9.13-1.36Z"/></svg>
-        <span>Settings</span>
-      </button>
-      <button class="side-btn hidden" data-tab="team" id="teamTabBtn" title="Team">
-        <svg viewBox="0 0 24 24"><path d="M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 3c-3.3 0-6 1.6-6 4v2h12v-2c0-2.4-2.7-4-6-4Zm7 0c-.5 0-1 .03-1.5.1 1 .9 1.5 2 1.5 3.4v2h5v-1.5c0-2-2.2-4-5-4Z"/></svg>
-        <span>Team</span>
-      </button>
-    </nav>
-    <div class="side-nav side-bottom">
-      <button id="syncBtn" class="side-btn" title="Sync monitors">
-        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.94 13h-2.02a6 6 0 1 1-1.6-6.02L13 10h7V3l-2.35 3.35Z"/></svg>
-        <span>Sync</span>
-      </button>
-      <button id="logoutBtn" class="side-btn" title="Log out">
-        <svg viewBox="0 0 24 24"><path d="M10 3h6a2 2 0 0 1 2 2v3h-2V5h-6v14h6v-3h2v3a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.6 7H3v2h10.6l-2.3 2.3 1.4 1.4L17 12l-4.3-4.3-1.4 1.4 2.3 2.3Z"/></svg>
-        <span>Log out</span>
+
+    <div class="side-foot">
+      <!-- Live cron-engine state: mirrors the scheduler settings, and doubles
+           as the manual sync trigger. -->
+      <div class="cron-card">
+        <div class="cron-top">
+          <span class="cron-title">Cron engine</span>
+          <span id="cronStatePill" class="pill"><span class="dot"></span><span id="cronStateLabel">—</span></span>
+        </div>
+        <div class="cron-bottom">
+          <span>Interval: <b id="cronInterval">—</b></span>
+          <button id="syncBtn" class="cron-sync" title="Sync monitors from Promptwatch">
+            <svg><use href="#i-sync"></use></svg><span>Sync now</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="user-card">
+        <div class="avatar" id="userInitial">–</div>
+        <div class="who">
+          <b id="userName">—</b>
+          <span id="userEmail">not signed in</span>
+        </div>
+      </div>
+
+      <button id="logoutBtn" class="logout-btn" title="Log out">
+        <svg><use href="#i-logout"></use></svg><span>Log out</span>
       </button>
     </div>
   </aside>
 
+  <header class="topbar">
+    <div class="crumb">
+      <span class="ctx">Promptwatch</span>
+      <span class="sep ctx">/</span>
+      <span class="here" id="crumbHere">Monitor &amp; Scheduler Hub</span>
+    </div>
+  </header>
+
   <main class="content">
-    <header class="topline">
+   <div class="page">
+
+    <!-- Back link lives at the very top, above everything else, whenever a
+         project is open. -->
+    <div class="crumbs hidden" id="crumbs">
+      <button id="backToProjects" class="btn ghost" aria-label="Back to all projects">
+        <svg><use href="#i-back"></use></svg>All projects
+      </button>
+    </div>
+
+    <div class="page-head">
       <div>
+        <div class="eyebrow" id="pageEyebrow">Hub control plane</div>
         <h1 id="pageTitle">Projects</h1>
         <p class="sub" id="pageSub">Pick a project to see its monitors, or manage everything at once.</p>
       </div>
-      <div class="topmeta">
-        <span id="tickState" class="pill"><span class="dot"></span><span id="tickLabel">—</span></span>
-      </div>
-    </header>
+    </div>
 
     <!-- PROJECTS (homepage) -->
     <section id="tab-monitors" class="panel">
-      <!-- Back button lives at the very top, above everything else, whenever
-           a project is open. -->
-      <div class="crumbs hidden" id="crumbs">
-        <button id="backToProjects" class="btn ghost" aria-label="Back to all projects">
-          <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>
-          All projects
-        </button>
-      </div>
-
-      <div class="stats-block" id="statsBlock">
-        <div class="stat-primary" id="statPrimary"></div>
-        <div class="stat-secondary" id="statSecondary"></div>
-      </div>
+      <div class="stats-block" id="statsBlock"></div>
 
       <!-- PROJECT LIST — every project and its schedule at a glance -->
       <div id="projectsView">
         <div class="toolbar">
-          <input id="projectSearch" class="input grow" type="search" placeholder="Search projects…">
-          <span class="spacer"></span>
-          <button id="runNow" class="btn">Run scheduler now</button>
+          <label class="search grow" style="max-width:420px">
+            <svg><use href="#i-search"></use></svg>
+            <input id="projectSearch" class="input" type="search" placeholder="Search projects by name…">
+          </label>
         </div>
 
         <div class="selectbar">
           <label class="check selectall"><input type="checkbox" id="selectAllProjects"> <span id="selectAllProjectsLabel">Select all</span></label>
           <div id="projectBulkActions" class="bulk-actions hidden">
             <span id="selectedProjectCount" class="pill">0 selected</span>
-            <button id="projectBulkActivate" class="btn">Turn on</button>
-            <button id="projectBulkDeactivate" class="btn">Turn off</button>
-            <button id="projectBulkSchedule" class="btn primary">Add time block</button>
-            <button id="projectBulkClearSchedule" class="btn danger solid">Clear schedules</button>
+            <button id="projectBulkActivate" class="btn sm">Turn on</button>
+            <button id="projectBulkDeactivate" class="btn sm">Turn off</button>
+            <button id="projectBulkSchedule" class="btn sm primary">Add time block</button>
+            <button id="projectBulkClearSchedule" class="btn sm danger solid">Clear schedules</button>
           </div>
         </div>
 
         <div id="projectList" class="rowlist"></div>
-        <p id="emptyProjects" class="empty hidden">No projects yet. Add your API key in <b>Settings</b>, then hit <b>Sync</b>.</p>
+        <p id="emptyProjects" class="empty hidden">No projects yet. Add your API key in <b>Settings</b>, then hit <b>Sync now</b>.</p>
       </div>
 
       <!-- PROJECT DETAIL — its monitors, plus the project's own schedule -->
       <div id="projectView" class="hidden">
-        <h2 id="projectViewTitle" class="project-view-title"></h2>
-
         <div class="project-schedule-bar" id="projectScheduleBar"></div>
 
         <div class="toolbar">
-          <input id="search" class="input grow" type="search" placeholder="Filter monitors…">
+          <label class="search grow" style="max-width:420px">
+            <svg><use href="#i-search"></use></svg>
+            <input id="search" class="input" type="search" placeholder="Filter monitors by name…">
+          </label>
           <label class="check"><input type="checkbox" id="inactiveOnly"> Inactive only</label>
           <span class="spacer"></span>
-          <button id="addByIdBtn" class="btn">Add by ID</button>
+          <button id="addByIdBtn" class="btn"><svg><use href="#i-plus"></use></svg>Add by ID</button>
         </div>
 
         <div id="adoptRow" class="card hidden">
-          <h2>Add a monitor by ID</h2>
-          <p class="muted small">Sync already finds every monitor with at least one prompt, active or
-            not. This is only for the rare monitor with zero prompts, which won't show up on its own —
-            copy its ID from the Promptwatch dashboard URL and paste it below.</p>
+          <div class="card-head">
+            <div class="card-icon"><svg><use href="#i-plus"></use></svg></div>
+            <div class="card-titles">
+              <h2>Add a monitor by ID</h2>
+              <p>Sync already finds every monitor with at least one prompt, active or not. This is only
+                for the rare monitor with zero prompts, which won't show up on its own — copy its ID
+                from the Promptwatch dashboard URL and paste it below.</p>
+            </div>
+          </div>
           <div class="row">
             <select id="adoptProject" class="input"></select>
             <textarea id="adoptIds" class="input grow" rows="3" placeholder="6ba7b818-9dad-11d1-80b4-00c04fd430c8&#10;6ba7b819-9dad-11d1-80b4-00c04fd430c8"></textarea>
           </div>
-          <div class="row end">
+          <div class="row end" style="margin-top:12px">
             <span id="adoptResult" class="muted small"></span>
             <span class="spacer"></span>
             <button id="adoptCancel" class="btn">Cancel</button>
@@ -135,8 +204,9 @@
           <label class="check selectall"><input type="checkbox" id="selectAll"> <span id="selectAllLabel">Select all</span></label>
           <div id="bulkActions" class="bulk-actions hidden">
             <span id="selectedCount" class="pill">0 selected</span>
-            <button id="bulkActivate" class="btn">Turn on</button>
-            <button id="bulkDeactivate" class="btn">Turn off</button>
+            <button id="bulkActivate" class="btn sm">Turn on</button>
+            <button id="bulkDeactivate" class="btn sm">Turn off</button>
+            <button id="bulkRemove" class="btn sm danger"><svg><use href="#i-trash"></use></svg>Remove</button>
           </div>
         </div>
 
@@ -147,19 +217,46 @@
 
     <!-- ALL MONITORS (flat, across every project — view/activate only; scheduling is project-level, see Projects) -->
     <section id="tab-allmonitors" class="panel hidden">
-      <div class="stats-block" id="allMonStatsBlock">
-        <div class="stat-primary" id="allMonStatPrimary"></div>
-      </div>
+      <div class="stats-block one" id="allMonStatsBlock"></div>
       <div class="toolbar">
-        <input id="allMonSearch" class="input grow" type="search" placeholder="Filter monitors…">
+        <label class="search grow" style="max-width:420px">
+          <svg><use href="#i-search"></use></svg>
+          <input id="allMonSearch" class="input" type="search" placeholder="Filter monitors by name or project…">
+        </label>
         <label class="check"><input type="checkbox" id="allMonInactiveOnly"> Inactive only</label>
+        <span class="spacer"></span>
+        <button id="allMonAddByIdBtn" class="btn"><svg><use href="#i-plus"></use></svg>Add by ID</button>
       </div>
+
+      <div id="allMonAdoptRow" class="card hidden">
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-plus"></use></svg></div>
+          <div class="card-titles">
+            <h2>Add a monitor by ID</h2>
+            <p>Sync already finds every monitor with at least one prompt, active or not. This is only
+              for the rare monitor with zero prompts, which won't show up on its own — pick its project,
+              then copy its ID from the Promptwatch dashboard URL and paste it below.</p>
+          </div>
+        </div>
+        <div class="row">
+          <select id="allMonAdoptProject" class="input"></select>
+          <textarea id="allMonAdoptIds" class="input grow" rows="3" placeholder="6ba7b818-9dad-11d1-80b4-00c04fd430c8&#10;6ba7b819-9dad-11d1-80b4-00c04fd430c8"></textarea>
+        </div>
+        <div class="row end" style="margin-top:12px">
+          <span id="allMonAdoptResult" class="muted small"></span>
+          <span class="spacer"></span>
+          <button id="allMonAdoptCancel" class="btn">Cancel</button>
+          <button id="allMonAdoptSave" class="btn primary">Add monitors</button>
+        </div>
+      </div>
+
       <div class="selectbar">
         <label class="check selectall"><input type="checkbox" id="allMonSelectAll"> <span id="allMonSelectAllLabel">Select all</span></label>
         <div id="allMonBulkActions" class="bulk-actions hidden">
           <span id="allMonSelectedCount" class="pill">0 selected</span>
-          <button id="allMonBulkActivate" class="btn">Turn on</button>
-          <button id="allMonBulkDeactivate" class="btn">Turn off</button>
+          <button id="allMonBulkActivate" class="btn sm">Turn on</button>
+          <button id="allMonBulkDeactivate" class="btn sm">Turn off</button>
+          <button id="allMonBulkRemove" class="btn sm danger"><svg><use href="#i-trash"></use></svg>Remove</button>
         </div>
       </div>
       <div id="allMonitorList" class="rowlist"></div>
@@ -176,7 +273,10 @@
           <option value="warn">Warning</option>
           <option value="error">Error</option>
         </select>
-        <input id="logSearch" class="input" type="search" placeholder="Filter log text…">
+        <label class="search grow" style="max-width:360px">
+          <svg><use href="#i-search"></use></svg>
+          <input id="logSearch" class="input" type="search" placeholder="Filter log text…">
+        </label>
         <span class="spacer"></span>
         <label class="check"><input type="checkbox" id="autoRefresh" checked> Auto-refresh</label>
       </div>
@@ -184,7 +284,7 @@
         <div class="logrow loghead">
           <span class="t">Time</span>
           <span class="lv">Level</span>
-          <span class="user">User</span>
+          <span class="user">User / actor</span>
           <span class="msg">Message</span>
         </div>
         <div id="logList"></div>
@@ -194,21 +294,33 @@
     <!-- SETTINGS -->
     <section id="tab-settings" class="panel hidden">
       <div class="card">
-        <h2>API key</h2>
-        <p class="muted">Stored server-side and never sent back to this page — you'll only ever see a
-          masked version. Use an <b>organization-level</b> key so projects can be listed.</p>
-        <div class="row">
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-key"></use></svg></div>
+          <div class="card-titles">
+            <h2>API key <span class="badge brand">Org level</span></h2>
+            <p>Stored server-side and never sent back to this page — you'll only ever see a masked
+              version. Use an <b>organization-level</b> key so projects can be listed.</p>
+          </div>
+        </div>
+        <div class="row wrap">
           <input id="apiKey" class="input grow" type="password" placeholder="Paste your Promptwatch API key" autocomplete="off">
-          <button id="saveKey" class="btn primary">Save &amp; sync</button>
-          <button id="testKey" class="btn">Test</button>
+          <button id="saveKey" class="btn brand">Save &amp; sync</button>
+          <button id="testKey" class="btn">Test connection</button>
           <button id="clearKey" class="btn danger">Remove</button>
         </div>
-        <p id="keyState" class="muted"></p>
+        <p id="keyState" class="muted small" style="margin:12px 0 0"></p>
       </div>
 
       <div class="card">
-        <h2>Scheduler</h2>
-        <div class="row wrap">
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-timer"></use></svg></div>
+          <div class="card-titles">
+            <h2>Scheduler</h2>
+            <p>All schedule times are evaluated in this timezone. Turning automation off leaves
+              monitors exactly as they are.</p>
+          </div>
+        </div>
+        <div class="row wrap" style="align-items:flex-end">
           <label class="field">Timezone
             <input id="timezone" class="input" list="tzlist" placeholder="e.g. Asia/Kolkata">
             <datalist id="tzlist"></datalist>
@@ -217,16 +329,20 @@
             <input id="tickSeconds" class="input" type="number" min="10" step="10">
           </label>
           <label class="field">Automation
-            <label class="switch"><input type="checkbox" id="schedulerEnabled"><span></span></label>
+            <span class="field-control"><label class="switch"><input type="checkbox" id="schedulerEnabled"><span></span></label></span>
           </label>
-          <button id="saveScheduler" class="btn primary">Save</button>
+          <button id="saveScheduler" class="btn primary">Save configuration</button>
         </div>
-        <p class="muted">All schedule times are evaluated in this timezone. Turning automation off
-          leaves monitors exactly as they are.</p>
       </div>
 
       <div class="card">
-        <h2>API usage per hour <span class="muted small">(last 24 h)</span></h2>
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-chart"></use></svg></div>
+          <div class="card-titles">
+            <h2>API usage <span class="badge">Rolling 24 h</span></h2>
+            <p>Calls made to Promptwatch per hour, and which endpoints they hit.</p>
+          </div>
+        </div>
         <div class="usage-head">
           <div><b id="uLastHour">0</b><span class="muted small">calls this hour</span></div>
           <div><b id="u24">0</b><span class="muted small">calls / 24 h</span></div>
@@ -234,13 +350,19 @@
         </div>
         <div id="usageChart" class="chart"></div>
         <div id="usageAxis" class="chart-axis"></div>
+        <div class="section-label">Endpoint breakdown</div>
         <table class="endpoints"><tbody id="endpointRows"></tbody></table>
       </div>
 
       <div class="card">
-        <h2>Account</h2>
-        <p class="muted small">Change the password for the account you're logged in as. Nobody else
-          — including this app's operator — can see it.</p>
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-user"></use></svg></div>
+          <div class="card-titles">
+            <h2>Account</h2>
+            <p>Change the password for the account you're logged in as. Nobody else — including this
+              app's operator — can see it.</p>
+          </div>
+        </div>
         <div class="row wrap">
           <input id="curPassword" class="input" type="password" placeholder="Current password" autocomplete="current-password">
           <input id="newPassword" class="input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password">
@@ -253,11 +375,16 @@
     <!-- TEAM -->
     <section id="tab-team" class="panel hidden">
       <div class="card">
-        <h2>Invite a team member</h2>
-        <p class="muted small">Only <code>@contentninja.in</code> addresses can be invited. You set
-          their password and role directly — no email is sent.</p>
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-invite"></use></svg></div>
+          <div class="card-titles">
+            <h2>Invite a team member</h2>
+            <p>Only <code>@contentninja.in</code> addresses can be invited. You set their password and
+              role directly — no email is sent.</p>
+          </div>
+        </div>
         <div class="row wrap">
-          <input id="inviteEmail" class="input" type="email" placeholder="name@contentninja.in">
+          <input id="inviteEmail" class="input grow" type="email" placeholder="name@contentninja.in">
           <select id="inviteRole" class="input">
             <option value="viewer">Viewer</option>
             <option value="editor">Editor</option>
@@ -265,15 +392,23 @@
             <option value="super-admin">Super admin</option>
           </select>
           <input id="invitePassword" class="input" type="password" placeholder="Password (min 8 chars)">
-          <button id="inviteBtn" class="btn primary">Invite</button>
+          <button id="inviteBtn" class="btn brand">Invite member</button>
         </div>
-        <p id="inviteError" class="hint"></p>
+        <p id="inviteError" class="hint err-text"></p>
       </div>
       <div class="card">
-        <h2>Team members</h2>
+        <div class="card-head">
+          <div class="card-icon"><svg><use href="#i-shield"></use></svg></div>
+          <div class="card-titles">
+            <h2>Team members</h2>
+            <p>Roles decide what each member can change. Super admins can't be removed or demoted.</p>
+          </div>
+        </div>
         <div id="teamList" class="list"></div>
       </div>
     </section>
+
+   </div><!-- /page -->
   </main>
 
 </div><!-- /shell -->
@@ -290,10 +425,9 @@
   </div>
 </div>
 
-<!-- Schedule editor: manage a monitor's (or bulk selection's) time blocks.
-     Structure mirrors the time-block-scheduler reference: a start day+time
-     and end day+time form (not a day-of-week checkbox picker), a live
-     preview/duration, and a table of the blocks that exist so far. -->
+<!-- Schedule editor: manage a project's time blocks. A block is a start
+     day+time and an end day+time (not a day-of-week checkbox picker), with a
+     live preview/duration and a table of the blocks that exist so far. -->
 <div id="modal" class="modal hidden">
   <div class="modal-box wide">
     <h2 id="modalTitle">Schedule</h2>
@@ -352,14 +486,17 @@
 <!-- Login -->
 <div id="loginScreen" class="modal">
   <div class="modal-box login-box">
-    <h2>Promptwatch Scheduler</h2>
+    <div class="login-logo">
+      <svg><use href="#i-logo"></use></svg>
+      <b>Promptwatch Scheduler</b>
+    </div>
     <p class="muted small">Sign in to continue.</p>
     <div class="field-label">Email</div>
     <input id="loginEmail" class="input" type="email" placeholder="name@contentninja.in" autocomplete="username">
-    <div class="field-label">Password</div>
+    <div class="field-label" style="margin-top:12px">Password</div>
     <input id="loginPassword" class="input" type="password" placeholder="Password" autocomplete="current-password">
     <p id="loginError" class="hint err-text"></p>
-    <button id="loginBtn" class="btn primary login-submit">Log in</button>
+    <button id="loginBtn" class="btn brand login-submit">Log in</button>
   </div>
 </div>
 
