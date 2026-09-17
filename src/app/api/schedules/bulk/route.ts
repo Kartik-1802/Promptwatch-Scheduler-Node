@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (applied.length) {
+      // See the matching comment in [id]/route.ts — a schedule edit
+      // invalidates any override hold computed against the old blocks.
+      await prisma.monitor.updateMany({ where: { projectId: { in: applied } }, data: { overrideUntil: null } });
       await log(
         "info", "schedule.block.added",
         `Added block to ${applied.length} project(s): ${describeBlock(block)}${skipped.length ? ` (${skipped.length} skipped — overlap)` : ""}`,
@@ -65,6 +68,7 @@ export async function DELETE(req: NextRequest) {
     if (!projectIds.length) throw new ValidationError("No projects selected.");
 
     const { count } = await prisma.scheduleBlock.deleteMany({ where: { projectId: { in: projectIds } } });
+    await prisma.monitor.updateMany({ where: { projectId: { in: projectIds } }, data: { overrideUntil: null } });
     await log("info", "schedule.block.cleared", `Schedule cleared for ${projectIds.length} project(s) — ${count} block(s) removed`, { user: session!.email });
     return NextResponse.json({ ok: true, count: projectIds.length, state: await buildState() });
   } catch (err) {

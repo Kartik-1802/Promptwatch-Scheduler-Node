@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { ApiError, PromptwatchClient } from "./promptwatch";
 import { log } from "./store";
 import { ValidationError } from "./http";
+import { nextTransition, toBlockLike } from "./scheduler";
 
 export async function applyActive(
   monitorIds: string[],
@@ -15,6 +16,24 @@ export async function applyActive(
   const monitors = await prisma.monitor.findMany({ where: { id: { in: monitorIds } } });
   const byId = new Map(monitors.map((m) => [m.id, m]));
   const client = new PromptwatchClient(settings.apiKey);
+
+  // A manual flip is a deliberate override of whatever the project's own
+  // schedule wants right now — it should hold until the schedule's own next
+  // transition, not get silently reverted by the next tick. See
+  // overrideUntil's doc comment in schema.prisma. Only projects with a
+  // schedule (and a computable next transition) need one; a manual project
+  // has nothing to override in the first place.
+  const projectIds = [...new Set(monitors.map((m) => m.projectId))];
+  const projects = await prisma.project.findMany({
+    where: { id: { in: projectIds } },
+    include: { scheduleBlocks: true },
+  });
+  const overrideUntilByProject = new Map<string, Date | null>();
+  for (const project of projects) {
+    const blocks = project.scheduleBlocks.map(toBlockLike);
+    const next = blocks.length ? nextTransition(blocks, settings.timezone) : null;
+    overrideUntilByProject.set(project.id, next ? new Date(next.at) : null);
+  }
 
   const changed: string[] = [];
   const failed: Array<{ id: string; message: string }> = [];
@@ -48,7 +67,16 @@ export async function applyActive(
   }
 
   if (changed.length) {
-    await prisma.monitor.updateMany({ where: { id: { in: changed } }, data: { active, nextRetryAt: null } });
+    await Promise.all(
+      changed.map((monitorId) => {
+        const monitor = byId.get(monitorId)!;
+        const overrideUntil = overrideUntilByProject.get(monitor.projectId) ?? null;
+        return prisma.monitor.update({
+          where: { id: monitorId },
+          data: { active, nextRetryAt: null, overrideUntil },
+        });
+      })
+    );
   }
   return { changed, failed };
 }

@@ -65,6 +65,18 @@ model Monitor {
   seenAt            DateTime?
   nextRetryAt       DateTime?
   staleSince        DateTime?
+  // Set whenever a human flips this monitor against its project's own
+  // schedule-desired state. While in the future, the scheduler tick skips
+  // this monitor entirely instead of "correcting" it back — see
+  // src/lib/scheduler.ts's tick(). It's set to the project's own next
+  // scheduled transition (src/lib/scheduler.ts's nextTransition), so the
+  // manual choice naturally holds until the schedule would have changed its
+  // mind anyway, then control resumes with no extra step. Cleared whenever
+  // the project's blocks change, since a timestamp computed before the edit
+  // could now be wrong. Null when the monitor isn't manually held (including:
+  // no schedule exists on its project, so nothing to override in the first
+  // place).
+  overrideUntil     DateTime?
 }
 
 // Schedules live on the PROJECT, not the monitor — a project's blocks drive

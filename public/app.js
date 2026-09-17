@@ -70,6 +70,16 @@ function monitorsInScope(projectId) {
   return state.monitors.filter((m) => m.projectId === projectId);
 }
 
+// Est. responses/day = Total Prompts × Number of Models, per monitor.
+// A project's total is the sum of that across its monitors — equal to
+// Prompts × Models × Monitor count when every monitor in the project matches.
+function estResponses(monitor) {
+  return (monitor.promptCount ?? 0) * (monitor.models || []).length;
+}
+function estResponsesTotal(monitors) {
+  return monitors.reduce((sum, m) => sum + estResponses(m), 0);
+}
+
 function currentProject() {
   return activeProjectId ? state.projects.find((p) => p.id === activeProjectId) || null : null;
 }
@@ -172,6 +182,13 @@ function renderStats() {
   }));
 
   if (project) {
+    block.append(kpiCard({
+      eyebrow: "Est. responses/day",
+      value: estResponsesTotal(monitors),
+      unit: "at current prompts × models",
+      footLeft: "Prompts × models, summed",
+      footRight: String(monitors.length) + (monitors.length === 1 ? " monitor" : " monitors"),
+    }));
     const next = project.nextTransition;
     block.append(kpiCard({
       eyebrow: "Time blocks",
@@ -216,6 +233,13 @@ function renderStats() {
       unit: projects.length === 1 ? "project tracked" : "projects tracked",
       footLeft: "Monitors discovered",
       footRight: String(state.monitors.length),
+    }));
+    block.append(kpiCard({
+      eyebrow: "Est. responses/day",
+      value: estResponsesTotal(state.monitors),
+      unit: "across all projects",
+      footLeft: "Prompts × models, summed",
+      footRight: String(state.monitors.length) + (state.monitors.length === 1 ? " monitor" : " monitors"),
     }));
   }
 }
@@ -284,6 +308,11 @@ function renderProjects() {
     open.append(icon(ICON_CHEVRON, "ico chev"));
     open.onclick = () => openProject(p.id);
     row.append(open);
+
+    const est = el("div", "prow-est");
+    est.append(el("b", null, String(estResponsesTotal(monitorsInScope(p.id)))));
+    est.append(el("span", null, "responses/day"));
+    row.append(est);
 
     const mid = el("div", "prow-sched");
     mid.append(scheduleStateBadge(p));
@@ -440,6 +469,7 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   const name = el("div", "mname");
   name.append(el("span", null, m.name));
   name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Idle"));
+  if (m.overrideUntil) name.append(el("span", "badge brand", "Manual hold"));
   if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
   lead.append(name);
 
@@ -455,13 +485,24 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   // project level, so this just reports which project rule drives this row.
   const project = state.projects.find((p) => p.id === m.projectId);
   const cadence = el("div", "mrow-cadence");
-  if (project && project.blocks.length) {
+  if (m.overrideUntil) {
+    // Manually set against the project's own schedule — held until the
+    // schedule's next transition, when control resumes automatically.
+    cadence.append(el("span", "mono", "Manual hold"));
+    cadence.append(el("span", null, `Until ${new Date(m.overrideUntil).toLocaleString([], {
+      weekday: "short", hour: "2-digit", minute: "2-digit" })}`));
+  } else if (project && project.blocks.length) {
     cadence.append(el("span", "mono", `${project.blocks.length} time block${project.blocks.length === 1 ? "" : "s"}`));
     cadence.append(el("span", null, project.inWindow ? "In window now" : "Outside window"));
   } else {
     cadence.append(el("span", "mono", "Manual trigger"));
   }
   row.append(cadence);
+
+  const est = el("div", "mrow-est");
+  est.append(el("b", null, String(estResponses(m))));
+  est.append(el("span", null, "responses/day"));
+  row.append(est);
 
   const toggleWrap = el("div", "toggle-wrap");
   const stateLabel = el("span", `toggle-state ${m.active ? "on" : "off"}`, m.active ? "ON" : "OFF");
@@ -547,6 +588,13 @@ function renderAllMonitors() {
     unit: "projects linked",
     footLeft: "Showing here",
     footRight: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+  }));
+  statsBlock.append(kpiCard({
+    eyebrow: "Est. responses/day",
+    value: estResponsesTotal(state.monitors),
+    unit: "across all monitors",
+    footLeft: "Prompts × models, summed",
+    footRight: `${total} total`,
   }));
 
   const list = $("#allMonitorList");

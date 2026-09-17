@@ -150,6 +150,14 @@ export async function tick(force = false, actor = "Scheduler") {
   const client = new PromptwatchClient(settings.apiKey);
   const changes: Array<{ monitorId: string; active: boolean }> = [];
 
+  // Overrides that have passed their hold time are just stale bookkeeping —
+  // clear them up front so this tick (and buildState right after it) both
+  // see a clean slate instead of a timestamp that's already in the past.
+  await prisma.monitor.updateMany({
+    where: { overrideUntil: { lte: new Date() } },
+    data: { overrideUntil: null },
+  });
+
   const projects = await prisma.project.findMany({ include: { scheduleBlocks: true } });
 
   for (const project of projects) {
@@ -158,8 +166,16 @@ export async function tick(force = false, actor = "Scheduler") {
     if (desired === null) continue; // no schedule on this project — left manual
 
     const monitors = await prisma.monitor.findMany({ where: { projectId: project.id } });
+    // A monitor with a live overrideUntil was deliberately set against the
+    // schedule by a person — leave it alone until that hold expires (see the
+    // field's doc comment in schema.prisma) instead of "correcting" it back
+    // every tick. (The manual toggle itself already logged the action; no
+    // need to re-log the skip on every single tick while it holds.)
     const pending = monitors.filter(
-      (m) => m.active !== desired && (force || !m.nextRetryAt || m.nextRetryAt.getTime() <= Date.now())
+      (m) =>
+        m.active !== desired &&
+        !(m.overrideUntil && m.overrideUntil.getTime() > Date.now()) &&
+        (force || !m.nextRetryAt || m.nextRetryAt.getTime() <= Date.now())
     );
     if (!pending.length) continue;
 

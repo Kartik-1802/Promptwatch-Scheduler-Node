@@ -29,6 +29,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await prisma.scheduleBlock.create({
       data: { projectId: params.id, startDay: block.startDay, startTime: block.startTime, endDay: block.endDay, endTime: block.endTime, trigger: block.trigger },
     });
+    // Any manual-override hold on this project's monitors was computed
+    // against the old block set — the schedule just changed, so those
+    // timestamps may no longer land on a real transition. Clear them; the
+    // edit is itself a deliberate admin action that should take effect now.
+    await prisma.monitor.updateMany({ where: { projectId: params.id }, data: { overrideUntil: null } });
 
     await log(
       "info", "schedule.block.added",
@@ -51,6 +56,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!project) throw new ValidationError("Unknown project — run a sync first.");
 
     const { count } = await prisma.scheduleBlock.deleteMany({ where: { projectId: params.id } });
+    await prisma.monitor.updateMany({ where: { projectId: params.id }, data: { overrideUntil: null } });
     await log(
       "info", "schedule.block.cleared",
       `Schedule cleared for '${project.name}' — ${count} block(s) removed. Its monitors are now manual.`,

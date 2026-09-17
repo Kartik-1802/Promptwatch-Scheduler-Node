@@ -32,6 +32,11 @@ export async function buildState() {
     responseCount: m.responseCount,
     averageVisibility: m.averageVisibility,
     staleSince: m.staleSince ? m.staleSince.toISOString() : null,
+    // Set while a manual on/off holds against the project's own schedule —
+    // see overrideUntil's doc comment in schema.prisma. Already-expired
+    // values are cleared by the scheduler tick, but that only runs when the
+    // scheduler itself is on, so guard here too rather than trust it's null.
+    overrideUntil: m.overrideUntil && m.overrideUntil.getTime() > Date.now() ? m.overrideUntil.toISOString() : null,
   }));
 
   // Each project carries its own schedule plus the live counts the homepage

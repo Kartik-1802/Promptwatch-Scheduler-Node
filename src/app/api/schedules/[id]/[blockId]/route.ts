@@ -34,6 +34,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string; 
       where: { id: params.blockId },
       data: { startDay: block.startDay, startTime: block.startTime, endDay: block.endDay, endTime: block.endTime, trigger: block.trigger },
     });
+    // See the matching comment in ../route.ts — a schedule edit invalidates
+    // any override hold computed against the old blocks.
+    await prisma.monitor.updateMany({ where: { projectId: params.id }, data: { overrideUntil: null } });
 
     await log(
       "info", "schedule.block.edited",
@@ -60,6 +63,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!existing || existing.projectId !== params.id) throw new ValidationError("Unknown schedule block.");
 
     await prisma.scheduleBlock.delete({ where: { id: params.blockId } });
+    await prisma.monitor.updateMany({ where: { projectId: params.id }, data: { overrideUntil: null } });
     await log(
       "info", "schedule.block.removed",
       `Removed block from '${project.name}': ${describeBlock(toBlockLike(existing))}`,
