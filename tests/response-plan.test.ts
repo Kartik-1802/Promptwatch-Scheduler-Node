@@ -10,6 +10,7 @@ test('Tue/Thu/Fri count three separate blocks; multiple models multiply response
 test('manual ON counts seven runs and OFF contributes nothing', () => {
   assert.equal(weeklyResponses([monitor], []), 140);
   assert.equal(weeklyResponses([{ ...monitor, active: false }], []), 0);
+  assert.equal(weeklyResponses([{ ...monitor, active: false }], blocks), 60);
 });
 test('reset uses local midnight on the 6th, handles year rollover and leap February', () => {
   assert.equal(responsePeriods(new Date('2026-10-05T18:29:59Z'), tz).start, '2026-09-06');
@@ -85,11 +86,17 @@ test('rounding applies at 24-hour boundaries and across the end of the week', ()
   assert.equal(expectedWeeklyRuns([{ ...block, endTime: '09:01' }]), 2);
   assert.equal(expectedWeeklyRuns([{ ...block, startDay: 6, endDay: 0 }]), 1);
 });
-test('inverted ON gaps round individually, including a gap crossing Sunday', () => {
+test('inverted schedules subtract each rounded OFF block from seven days', () => {
   assert.equal(expectedWeeklyRuns([
     { startDay: 1, startTime: '09:00', endDay: 2, endTime: '09:00', trigger: 'off_on' },
     { startDay: 4, startTime: '09:00', endDay: 5, endTime: '09:00', trigger: 'off_on' },
-  ]), 5); // Wed→Fri = 2 days; Sat→Tue = 3 days
+  ]), 5);
+  const off = { startDay: 0, startTime: '09:00', endDay: 0, endTime: '17:00', trigger: 'off_on' };
+  assert.equal(expectedWeeklyRuns([off]), 6);
+  assert.equal(expectedWeeklyRuns([off, { ...off, startDay: 3, endDay: 3 }]), 5);
+  assert.equal(expectedWeeklyRuns([{ ...off, endDay: 2 }]), 4);
+  assert.equal(expectedWeeklyRuns([{ ...off, startDay: 6, endDay: 0 }]), 5);
+  assert.equal(expectedWeeklyRuns([{ ...off, endTime: '09:00' }]), 0);
 });
 test('mixed-trigger schedules count only ON blocks, matching scheduler behavior', () => {
   assert.equal(expectedWeeklyRuns([

@@ -1,7 +1,7 @@
 import type { ResponseUsage, ResponseUsageReport } from '@prisma/client';
 import { prisma } from './db';
 import { OrganizationUsage, PromptwatchClient } from './promptwatch';
-import { addDays, midnight, weeklyResponses, predictionAlert, RESPONSE_LIMIT, responsePeriods, remainingPlan, weekday, PlanBlock, PlanMonitor } from './response-plan';
+import { addDays, midnight, predictionAlert, RESPONSE_LIMIT, responsePeriods, remainingPlan, weekday, projectFormula, FormulaOverride, PlanBlock, PlanMonitor } from './response-plan';
 
 const REFRESH_MS = 60 * 60_000;
 export type ProjectConsumption = { id: string; name: string; responses: number; cap: number | null };
@@ -69,37 +69,42 @@ type MonitorPlan = PlanMonitor & { id?: string; projectId: string };
 export async function responseState(projects: ProjectPlan[], monitors: MonitorPlan[], timezone: string, automated: boolean, now = new Date()) {
   const report = await prisma.responseUsageReport.findFirst({ orderBy: { periodFrom: 'desc' } });
   const period = responsePeriods(now, timezone, report);
-  const usage = await prisma.responseUsage.findMany({ where: { timezone, start: { gte: period.start, lte: period.today } } });
-  return summarizeResponses(projects, monitors, timezone, automated, now, usage, report);
+  const [usage, formulas] = await Promise.all([
+    prisma.responseUsage.findMany({ where: { timezone, start: { gte: period.start, lte: period.today } } }),
+    prisma.responseFormula.findMany(),
+  ]);
+  return summarizeResponses(projects, monitors, timezone, automated, now, usage, report, formulas);
 }
-export function summarizeResponses(projects: ProjectPlan[], monitors: MonitorPlan[], timezone: string, automated: boolean, now: Date, usage: ResponseUsage[], report: ResponseUsageReport | null = null) {
+export function summarizeResponses(projects: ProjectPlan[], monitors: MonitorPlan[], timezone: string, automated: boolean, now: Date, usage: ResponseUsage[], report: ResponseUsageReport | null = null, formulas: FormulaOverride[] = []) {
   const period = responsePeriods(now, timezone, report);
   const currentReport = report && report.periodFrom <= now && report.periodTo > now ? report : null;
   const consumption = (currentReport?.projects ?? []) as ProjectConsumption[];
   const find = (id: string, start: string, end: string) => usage.find(u => u.projectId === id && u.start === start && u.end === end);
   const estimateWeekStart = addDays(period.today, -weekday(period.today));
   const estimateWeekEnd = addDays(estimateWeekStart, 7);
+  const calculationByProject = new Map(projects.map(project => [project.id, projectFormula(
+    monitors.filter(m => m.projectId === project.id), project.blocks, automated,
+    formulas.find(f => f.projectId === project.id),
+  )]));
   const byMonitor = Object.fromEntries(monitors.filter(m => m.id).map(m => {
-    const blocks = projects.find(p => p.id === m.projectId)?.blocks ?? [];
-    const weekly = weeklyResponses([m], blocks, automated);
-    return [m.id!, {
-      daily: m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0,
-      weekly,
-      monthly: weekly * 4,
-    }];
+    const factors = calculationByProject.get(m.projectId);
+    const daily = m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0;
+    const plannedBase = factors?.scheduled || m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0;
+    const weekly = plannedBase * (factors?.runsPerWeek ?? 7);
+    return [m.id!, { daily, weekly, monthly: weekly * (factors?.weeksPerMonth ?? 4) }];
   }));
   const byProject = Object.fromEntries(projects.map(project => {
-    const own = monitors.filter(m => m.projectId === project.id);
     const month = consumption.find(p => p.id === project.id);
     const week = find(project.id, period.weekStart, period.weekEnd);
-    const weekly = weeklyResponses(own, project.blocks, automated);
-    const predicted = weekly * 4;
+    const calculation = calculationByProject.get(project.id)!;
+    const weekly = calculation.weekly;
+    const predicted = calculation.monthly;
     const remaining = remainingPlan(weekly, now, period.resetAt).responses;
     const used = month?.responses ?? null;
     // In the first week both periods start together: use the official count.
     const weeklyOfficial = period.weekStart === period.start;
     return [project.id, {
-      used, providerCap: month?.cap ?? null,
+      calculation, dailyEstimate: calculation.daily, used, providerCap: month?.cap ?? null,
       monthlyPredicted: predicted, weeklyPredicted: weekly, weeklyUsed: weeklyOfficial ? used : week?.responses ?? null,
       weeklySource: weeklyOfficial ? 'official usage' : 'dated response records',
       forecast: used === null ? null : used + remaining,

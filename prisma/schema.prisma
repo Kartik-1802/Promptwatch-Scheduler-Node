@@ -172,3 +172,12 @@ model ResponseUsageReport {
   projects Json
   observedAt DateTime @default(now())
 }
+
+// Per-project editable estimate factors; independent of official usage counters.
+model ResponseFormula {
+  projectId String @id
+  baseResponses Int?
+  runsPerWeek Int?
+  weeksPerMonth Int @default(4)
+  updatedAt DateTime @updatedAt
+}

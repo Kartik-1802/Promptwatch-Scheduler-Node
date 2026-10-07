@@ -66,10 +66,55 @@ test('duration-based weekly runs feed monitor and project monthly estimates', ()
     { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' },
     { startDay: 3, startTime: '09:00', endDay: 4, endTime: '09:00', trigger: 'on_off' },
   ];
-  const result = summarizeResponses([{ ...project, blocks: windows }], [{ ...monitor, id: 'm', active: false, promptCount: 345, models: ['a'] }], timezone, true, now, []);
-  assert.equal(result.byMonitor.m.daily, 0);
+  const result = summarizeResponses([{ ...project, blocks: windows }], [{ ...monitor, id: 'm', active: true, promptCount: 345, models: ['a'] }], timezone, true, now, []);
+  assert.equal(result.byMonitor.m.daily, 345);
   assert.equal(result.byMonitor.m.weekly, 690);
   assert.equal(result.byMonitor.m.monthly, 2760);
   assert.equal(result.byProject.p.weeklyPredicted, 690);
   assert.equal(result.byProject.p.monthlyPredicted, 2760);
+});
+test('every project uses its own ON monitors and saved factors without changing actuals', () => {
+  const projects = [{ id: 'a', blocks: [] }, { id: 'b', blocks: [] }];
+  const monitors = [
+    { ...monitor, id: 'a-on', projectId: 'a' },
+    { ...monitor, id: 'a-off', projectId: 'a', active: false, promptCount: 100 },
+    { ...monitor, id: 'b-on', projectId: 'b', promptCount: 3 },
+  ];
+  const report = { periodFrom: new Date('2026-10-06'), periodTo: new Date('2026-11-06'), responses: 23, providerLimit: 15000, projects: [{ id: 'a', name: 'A', responses: 23, cap: null }], observedAt: now };
+  const result = summarizeResponses(projects, monitors, timezone, true, now, [], report, [{ projectId: 'a', baseResponses: null, runsPerWeek: 3, weeksPerMonth: 4 }]);
+  assert.equal(result.byProject.a.monthlyPredicted, 20 * 3 * 4);
+  assert.equal(result.byProject.b.monthlyPredicted, 6 * 7 * 4);
+  assert.equal(result.byMonitor['a-off'].monthly, 0);
+  assert.equal(result.byProject.a.used, 23);
+  assert.equal(result.used, 23);
+  const overridden = summarizeResponses(projects, monitors, timezone, true, now, [], report, [{ projectId: 'a', baseResponses: 100, runsPerWeek: 2, weeksPerMonth: 5 }]);
+  assert.equal(overridden.byProject.a.monthlyPredicted, 1000);
+  assert.equal(overridden.byProject.b.monthlyPredicted, 168);
+  assert.equal(overridden.used, 23);
+});
+test('scheduled OFF monitors retain weekly and monthly plans while daily stays zero', () => {
+  const blocks = [{ startDay: 1, startTime: '00:00', endDay: 1, endTime: '17:00', trigger: 'on_off' }];
+  const scheduled = { ...project, blocks };
+  const off = { ...monitor, id: 'monsoon', active: false, promptCount: 25, models: ['a', 'b', 'c'] };
+  const result = summarizeResponses([scheduled], [off], timezone, true, now, []);
+  assert.equal(result.byMonitor.monsoon.daily, 0);
+  assert.equal(result.byMonitor.monsoon.weekly, 75);
+  assert.equal(result.byMonitor.monsoon.monthly, 300);
+  assert.equal(result.byProject.p.dailyEstimate, 0);
+  assert.equal(result.byProject.p.weeklyPredicted, 75);
+  assert.equal(result.byProject.p.monthlyPredicted, 300);
+  const on = summarizeResponses([scheduled], [{ ...off, active: true }], timezone, true, now, []);
+  assert.equal(on.byProject.p.dailyEstimate, 75);
+  assert.equal(on.byProject.p.monthlyPredicted, 300);
+  const paused = summarizeResponses([scheduled], [off], timezone, false, now, []);
+  assert.equal(paused.byProject.p.weeklyPredicted, 0);
+});
+test('one partial OFF day gives six runs across project and monitor estimates', () => {
+  const blocks = [{ startDay: 0, startTime: '09:00', endDay: 0, endTime: '17:00', trigger: 'off_on' }];
+  const result = summarizeResponses([{ ...project, blocks }], [{ ...monitor, id: 'nip', promptCount: 61, models: ['a', 'b', 'c'] }], timezone, true, now, []);
+  assert.equal(result.byProject.p.calculation.runsPerWeek, 6);
+  assert.equal(result.byProject.p.weeklyPredicted, 1098);
+  assert.equal(result.byProject.p.monthlyPredicted, 4392);
+  assert.equal(result.byMonitor.nip.weekly, 1098);
+  assert.equal(result.byMonitor.nip.monthly, 4392);
 });

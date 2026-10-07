@@ -51,29 +51,18 @@ function blockDuration(block: PlanBlock) {
   const end = minute(block.endDay, block.endTime);
   return end > start ? end - start : WEEK_MINUTES - start + end;
 }
-/** Round each separate active window up to 24-hour runs, then add them. */
+/** Round each block up to days; ON blocks add runs, inverted OFF blocks subtract from seven. */
 export function expectedWeeklyRuns(blocks: PlanBlock[]): number {
   if (!blocks.length) return 7;
   if (blocks.every(b => b.trigger === 'off_on')) {
-    // Inverted schedules are ON in the gaps between their OFF blocks.
-    // Treat the week as a circle so Sunday→Monday never splits one window.
-    const ordered = [...blocks].sort((a, b) => minute(a.startDay, a.startTime) - minute(b.startDay, b.startTime));
-    return ordered.reduce((runs, block, index) => {
-      const end = minute(block.startDay, block.startTime) + blockDuration(block);
-      const next = ordered[(index + 1) % ordered.length];
-      const nextStart = minute(next.startDay, next.startTime) + (index === ordered.length - 1 ? WEEK_MINUTES : 0);
-      return runs + Math.ceil(Math.max(0, nextStart - end) / 1440);
-    }, 0);
+    const offDays = blocks.reduce((sum, block) => sum + Math.ceil(blockDuration(block) / 1440), 0);
+    return Math.max(0, 7 - offDays);
   }
   // Mixed triggers default OFF outside blocks, as the scheduler does.
   return blocks.filter(b => b.trigger !== 'off_on').reduce((runs, block) => runs + Math.ceil(blockDuration(block) / 1440), 0);
 }
 export function weeklyResponses(monitors: PlanMonitor[], blocks: PlanBlock[], automated = true): number {
-  const scheduledRuns = expectedWeeklyRuns(blocks);
-  return monitors.reduce((total, monitor) => {
-    const runs = blocks.length && automated ? scheduledRuns : monitor.active ? 7 : 0;
-    return total + Math.max(0, monitor.promptCount ?? 0) * monitor.models.length * runs;
-  }, 0);
+  return projectFormula(monitors, blocks, automated).weekly;
 }
 export function predictionAlert(used: number | null, predicted: number) {
   return used !== null && used > 0 && (predicted === 0 || used / predicted >= 0.7);
@@ -83,4 +72,21 @@ export function predictionAlert(used: number | null, predicted: number) {
 export function remainingPlan(weekly: number, now: Date, resetAt: string) {
   const days = Math.max(0, Math.ceil((Date.parse(resetAt) - now.getTime()) / 86400000));
   return { days, responses: Math.ceil(weekly * days / 7) };
+}
+
+export type FormulaOverride = { projectId: string; baseResponses: number | null; runsPerWeek: number | null; weeksPerMonth: number };
+export function projectFormula(monitors: PlanMonitor[], blocks: PlanBlock[], automated = true, override?: FormulaOverride) {
+  const scheduled = blocks.length > 0 && automated;
+  const automaticBase = monitors.reduce((sum, m) => sum + (scheduled || m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0), 0);
+  const daily = monitors.reduce((sum, m) => sum + (m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0), 0);
+  const automaticRuns = blocks.length && automated ? expectedWeeklyRuns(blocks) : 7;
+  const baseResponses = override?.baseResponses ?? automaticBase;
+  const runsPerWeek = override?.runsPerWeek ?? automaticRuns;
+  const weeksPerMonth = override?.weeksPerMonth ?? 4;
+  return { automaticBase, automaticRuns, baseResponses, runsPerWeek, weeksPerMonth, scheduled,
+    daily, weekly: baseResponses * runsPerWeek, monthly: baseResponses * runsPerWeek * weeksPerMonth,
+    custom: !!override,
+    baseCustom: override?.baseResponses !== null && override?.baseResponses !== undefined,
+    runsCustom: override?.runsPerWeek !== null && override?.runsPerWeek !== undefined,
+  };
 }

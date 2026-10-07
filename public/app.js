@@ -83,22 +83,28 @@ function estimateFor(monitor) {
   return state.responses?.byMonitor?.[monitor.id]?.[responsePeriod] ?? null;
 }
 function estimateTotal(monitors) {
+  const ids = [...new Set(monitors.map(m => m.projectId).filter(Boolean))];
+  if (ids.length && ids.every(id => state.responses?.byProject?.[id]?.calculation)) {
+    return ids.reduce((sum, id) => sum + state.responses.byProject[id].calculation[responsePeriod], 0);
+  }
   const values = monitors.map(estimateFor);
   return values.some(v => v === null) ? null : values.reduce((sum, value) => sum + value, 0);
 }
 function estimateLabel() { return { daily: 'day', weekly: 'week', monthly: 'month' }[responsePeriod]; }
 function estimateHint() {
   return responsePeriod === 'daily' ? 'Prompts × models for monitors currently ON.'
-    : responsePeriod === 'weekly' ? 'Each active block’s duration ÷ 24 hours, rounded up separately. Prompts × models × expected runs.'
-    : 'Weekly estimate × 4.';
+    : responsePeriod === 'weekly' ? 'Responses per scheduled run × runs per week. Manual projects use ON monitors.'
+    : 'Weekly planned responses × weeks per month (default 4).';
 }
 function responseSummaryCard(monitors) {
   const card = kpiCard({
     eyebrow: `Est. responses/${estimateLabel()}`,
     value: responseNumber(estimateTotal(monitors)),
-    unit: responsePeriod === 'daily' ? 'ON monitors only' : responsePeriod === 'weekly' ? 'this week' : '4 weeks',
+    unit: responsePeriod === 'daily' ? 'ON monitors only' : responsePeriod === 'weekly' ? 'per week' : 'per month',
   });
   card.title = estimateHint();
+  const project = currentProject();
+  if (project) card.querySelector('.kpi-top').append(formulaInfo(project));
   return card;
 }
 
@@ -228,13 +234,10 @@ function renderStats() {
         : "—",
     }));
     block.append(kpiCard({
-      eyebrow: "Dispatch mode",
-      badge: project.desiredActive === null
-        ? { text: "On demand", tone: "off" }
-        : { text: project.inWindow ? "In window" : "Outside window", tone: project.inWindow ? "on" : "warnb" },
-      value: project.desiredActive === null ? "Manual" : (project.inWindow ? "Scheduled on" : "Scheduled off"),
-      unit: "right now",
-      footLeft: project.desiredActive === null ? "Needs an operator" : "Driven by the schedule",
+      eyebrow: "Total responses",
+      value: responseNumber(monitors.reduce((sum, monitor) => sum + Math.max(0, monitor.promptCount ?? 0) * (monitor.models || []).length, 0)),
+      unit: "per run · all monitors",
+      footLeft: "Prompts × models, added across monitors",
     }));
   } else {
     const projects = manageableProjects();
@@ -364,6 +367,7 @@ function renderProjects() {
     est.append(el("b", null, responseNumber(estimateTotal(monitorsInScope(p.id)))));
     est.append(el("span", null, `est. responses/${estimateLabel()}`));
     est.title = estimateHint();
+    est.append(formulaInfo(p));
     row.append(est);
 
     const mid = el("div", "prow-sched");
@@ -550,6 +554,7 @@ function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
   est.append(el("b", null, responseNumber(estimateFor(m))));
   est.append(el("span", null, `est. responses/${estimateLabel()}`));
   est.title = estimateHint();
+  if (project) est.append(formulaInfo(project, m));
   row.append(est);
 
   const toggleWrap = el("div", "toggle-wrap");
@@ -1504,3 +1509,111 @@ function responsePeriodSwitch() {
   return switcher;
 }
 
+
+let formulaInfoCounter = 0;
+function formulaInfo(project, monitor = null) {
+  const calculation = state.responses?.byProject[project.id]?.calculation;
+  const wrap = el('span', 'formula-info');
+  const button = el('button', 'formula-info-button', 'i');
+  button.type = 'button';
+  button.setAttribute('aria-label', `How responses are calculated for ${monitor?.name || project.name}`);
+  const popup = el('div', 'formula-tip');
+  popup.id = `formula-info-${++formulaInfoCounter}`;
+  popup.setAttribute('popover', 'manual');
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-label', 'Response calculation');
+  button.setAttribute('aria-controls', popup.id);
+  button.setAttribute('aria-expanded', 'false');
+  if (calculation) {
+    const base = monitor ? (calculation.scheduled || monitor.active ? Math.max(0, monitor.promptCount ?? 0) * (monitor.models || []).length : 0) : calculation.baseResponses;
+    popup.append(el('b', null, monitor?.name || project.name));
+    if (monitor) popup.append(el('p', null, `${monitor.promptCount ?? 0} prompts × ${(monitor.models || []).length} models${calculation.scheduled || monitor.active ? '' : ' × 0 (OFF)'} = ${responseNumber(base)} responses/run`));
+    else popup.append(el('p', null, `${responseNumber(base)} responses/run${calculation.baseCustom ? ' (saved override)' : calculation.scheduled ? ' from scheduled monitors' : ' from ON monitors'}`));
+    popup.append(el('p', 'formula-note', `Daily: ${responseNumber(monitor ? estResponses(monitor) : calculation.daily)} from monitors currently ON.`));
+    popup.append(el('p', null, `${responseNumber(base)} × ${calculation.runsPerWeek} runs/week = ${responseNumber(base * calculation.runsPerWeek)} / week`));
+    popup.append(el('p', null, `${responseNumber(base)} × ${calculation.runsPerWeek} × ${calculation.weeksPerMonth} weeks = ${responseNumber(base * calculation.runsPerWeek * calculation.weeksPerMonth)} / month`));
+    if (monitor && calculation.baseCustom) popup.append(el('p', null, 'The saved base override applies to the project total.'));
+    if (!calculation.runsCustom) popup.append(el('p', 'formula-note', !calculation.scheduled ? 'Manual: 7 runs per week.' : project.blocks.every(b => b.trigger === 'off_on') ? 'Runs: 7 minus OFF days. Each OFF block’s hours ÷ 24 is rounded up separately.' : 'Runs: each ON block’s hours ÷ 24, rounded up separately.'));
+  } else popup.append(el('p', null, 'Calculation not available yet.'));
+  const edit = el('button', 'btn sm', 'Edit project formula');
+  edit.disabled = !canMutate() || !calculation;
+  edit.onclick = () => { hide(); openFormulaEditor(project); };
+  popup.append(edit);
+  let hideTimer;
+  function show() {
+    clearTimeout(hideTimer);
+    const rect = button.getBoundingClientRect();
+    popup.style.left = `${Math.max(8, Math.min(rect.left - 220, window.innerWidth - 308))}px`;
+    popup.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - 270))}px`;
+    if (!popup.matches(':popover-open')) popup.showPopover();
+    button.setAttribute('aria-expanded', 'true');
+  }
+  function hide() {
+    clearTimeout(hideTimer);
+    if (popup.matches(':popover-open')) popup.hidePopover();
+    button.setAttribute('aria-expanded', 'false');
+  }
+  const later = () => { hideTimer = setTimeout(hide, 180); };
+  button.onmouseenter = show;
+  button.onmouseleave = later;
+  button.onfocus = show;
+  button.onclick = show;
+  button.onblur = () => { if (!popup.contains(document.activeElement)) later(); };
+  popup.onmouseenter = () => clearTimeout(hideTimer);
+  popup.onmouseleave = later;
+  popup.onfocusin = () => clearTimeout(hideTimer);
+  popup.onfocusout = () => { if (!popup.contains(document.activeElement)) later(); };
+  wrap.onkeydown = event => { if (event.key === 'Escape') hide(); };
+  wrap.append(button, popup);
+  return wrap;
+}
+function openFormulaEditor(project) {
+  const factors = state.responses.byProject[project.id].calculation;
+  const dialog = el('dialog', 'formula-dialog');
+  dialog.setAttribute('aria-label', `Edit response formula for ${project.name}`);
+  const form = el('form', 'formula-form');
+  form.append(el('h2', null, project.name), el('p', 'formula-note', 'Responses per run × runs per week × weeks per month'));
+  function numberField(title, value, max, min = 0) {
+    const label = el('label', null, title);
+    const input = el('input', 'input');
+    input.type = 'number'; input.min = String(min); input.max = String(max); input.step = '1'; input.required = true; input.value = String(value);
+    label.append(input); form.append(label); return input;
+  }
+  const base = numberField('Responses per run', factors.baseResponses, 1000000);
+  const autoBaseLabel = el('label', 'formula-auto');
+  const autoBase = el('input'); autoBase.type = 'checkbox'; autoBase.checked = !factors.baseCustom;
+  autoBaseLabel.append(autoBase, document.createTextNode(` Use ${factors.scheduled ? 'scheduled' : 'ON'} monitors automatically (${factors.automaticBase})`)); form.append(autoBaseLabel);
+  const runs = numberField('Runs per week', factors.runsPerWeek, 100);
+  const autoRunsLabel = el('label', 'formula-auto');
+  const autoRuns = el('input'); autoRuns.type = 'checkbox'; autoRuns.checked = !factors.runsCustom;
+  autoRunsLabel.append(autoRuns, document.createTextNode(` Use schedule automatically (${factors.automaticRuns})`)); form.append(autoRunsLabel);
+  const weeks = numberField('Weeks per month', factors.weeksPerMonth, 52, 1);
+  const preview = el('p', 'formula-preview'); form.append(preview);
+  function update() {
+    base.disabled = autoBase.checked; runs.disabled = autoRuns.checked;
+    const b = autoBase.checked ? factors.automaticBase : Number(base.value);
+    const r = autoRuns.checked ? factors.automaticRuns : Number(runs.value);
+    preview.textContent = `${responseNumber(b)} × ${r} × ${weeks.value} = ${responseNumber(b * r * Number(weeks.value))} responses/month`;
+  }
+  for (const input of [base, autoBase, runs, autoRuns, weeks]) input.oninput = update;
+  update();
+  const error = el('p', 'response-warning'); error.setAttribute('role', 'alert'); form.append(error);
+  const actions = el('div', 'formula-actions');
+  const cancel = el('button', 'btn', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => dialog.close();
+  const reset = el('button', 'btn', 'Use defaults'); reset.type = 'button';
+  const save = el('button', 'btn primary', 'Save'); save.type = 'submit';
+  async function submit(resetDefaults) {
+    save.disabled = reset.disabled = true; error.textContent = '';
+    try {
+      const body = resetDefaults ? { projectId: project.id, reset: true } : { projectId: project.id, baseResponses: autoBase.checked ? null : Number(base.value), runsPerWeek: autoRuns.checked ? null : Number(runs.value), weeksPerMonth: Number(weeks.value) };
+      const result = await api('/api/responses/formula', {method:'POST', body});
+      apply(result.state); dialog.close(); toast('Project formula saved.');
+    } catch (err) { error.textContent = err.message; }
+    finally { save.disabled = reset.disabled = false; }
+  }
+  reset.onclick = () => submit(true);
+  form.onsubmit = event => { event.preventDefault(); submit(false); };
+  actions.append(reset, cancel, save); form.append(actions);
+  dialog.append(form); document.body.append(dialog);
+  dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
+}

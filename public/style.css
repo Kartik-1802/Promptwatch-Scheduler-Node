@@ -1015,3 +1015,17 @@ textarea.input { height: auto; padding: var(--s-sm) var(--s-md); font-family: va
 }
 
 .all-response-period { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+.formula-info { display: inline-flex; align-items: center; }
+.formula-info-button { border: 1px solid #94a3b8; border-radius: 50%; color: #53657e; background: white; width: 22px; height: 22px; padding: 0; font: 600 13px Georgia, serif; cursor: pointer; }
+.formula-info-button:focus-visible { outline: 2px solid #346bd4; outline-offset: 3px; }
+.formula-tip { position: fixed; inset: auto; width: min(300px, calc(100vw - 16px)); padding: 16px; border: 1px solid var(--border-subtle); border-radius: 10px; background: white; color: var(--ink-primary); box-shadow: 0 8px 32px rgb(15 23 42 / 18%); font-size: 13px; line-height: 1.5; text-align: left; margin: 0; }
+.formula-tip p { margin: 8px 0; }
+.formula-note { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+.formula-dialog { width: min(480px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--border-subtle); border-radius: 12px; color: var(--ink-primary); }
+.formula-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.formula-form { display: grid; gap: 14px; }
+.formula-form h2, .formula-form p { margin: 0; }
+.formula-form label { display: grid; gap: 6px; }
+.formula-form .formula-auto { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.formula-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.formula-preview { font-weight: 600; font-size: 14px; }
