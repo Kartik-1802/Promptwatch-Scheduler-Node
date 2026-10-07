@@ -361,13 +361,18 @@ function renderProjects() {
     open.append(lead);
     open.append(icon(ICON_CHEVRON, "ico chev"));
     open.onclick = () => openProject(p.id);
-    row.append(open);
+    const projectLead = el('div', 'project-name-info');
+    const projectHeading = el('div', 'project-name-heading');
+    projectHeading.append(open, formulaInfo(p));
+    projectHeading.append(open.querySelector('.chev'));
+    projectLead.append(projectHeading);
+    for (const detail of [...lead.children].slice(1)) projectLead.append(detail);
+    row.append(projectLead);
 
     const est = el("div", "prow-est");
     est.append(el("b", null, responseNumber(estimateTotal(monitorsInScope(p.id)))));
     est.append(el("span", null, `est. responses/${estimateLabel()}`));
     est.title = estimateHint();
-    est.append(formulaInfo(p));
     row.append(est);
 
     const mid = el("div", "prow-sched");
@@ -514,6 +519,8 @@ function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
   const lead = el("div", "lead");
   const name = el("div", "mname");
   name.append(el("span", null, m.name));
+  const project = state.projects.find((p) => p.id === m.projectId);
+  if (project) name.append(formulaInfo(project, m));
   name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Idle"));
   if (m.overrideUntil) name.append(el("span", "badge brand", "Manual hold"));
   if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
@@ -534,7 +541,6 @@ function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
 
   // Cadence comes from the monitor's project — scheduling is only ever done at
   // project level, so this just reports which project rule drives this row.
-  const project = state.projects.find((p) => p.id === m.projectId);
   const cadence = el("div", "mrow-cadence");
   if (m.overrideUntil) {
     // Manually set against the project's own schedule — held until the
@@ -554,7 +560,6 @@ function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
   est.append(el("b", null, responseNumber(estimateFor(m))));
   est.append(el("span", null, `est. responses/${estimateLabel()}`));
   est.title = estimateHint();
-  if (project) est.append(formulaInfo(project, m));
   row.append(est);
 
   const toggleWrap = el("div", "toggle-wrap");
@@ -602,7 +607,7 @@ function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
 }
 
 function renderAllMonitors() {
-  $("#allResponsePeriod").replaceChildren(responsePeriodSwitch());
+  $('#allResponsePeriod').replaceChildren(responseUsageSummary(), responsePeriodSwitch());
   const term = $("#allMonSearch").value.trim().toLowerCase();
   const onlyInactive = $("#allMonInactiveOnly").checked;
 
@@ -961,21 +966,28 @@ function renderBlockTable() {
 }
 
 async function saveBlock() {
+  if ($('#blockSave').disabled) return;
   $("#blockError").textContent = "";
+  $('#blockError').classList.remove('success-text');
   const startDay = Number($("#blockStartDay").value), endDay = Number($("#blockEndDay").value);
   const startTime = $("#schStart").value, endTime = $("#schEnd").value;
   const trigger = $("#blockTrigger").value;
   if (startDay === endDay && startTime === endTime) {
-    $("#blockError").textContent = "Start and end can't be the same moment — pick a different end.";
+    $("#blockError").textContent = "✕ Error: Start and end can't be the same moment — pick a different end.";
     return;
   }
   const body = { startDay, startTime, endDay, endTime, trigger };
+  const wasUpdating = !!editingBlockId;
+  const loading = $('#blockLoading');
+  $('#blockSave').disabled = true;
+  const loadingTimer = setTimeout(() => loading.classList.remove('hidden'), 100);
   try {
     if (editing.mode === "bulk") {
       const res = await api("/api/schedules/bulk", { method: "POST", body: { ...body, projectIds: editing.projectIds } });
       apply(res.state);
-      $("#modal").classList.add("hidden");
       const skipped = res.skipped.length;
+      $('#blockError').classList.toggle('success-text', !skipped);
+      $('#blockError').textContent = skipped ? `✕ Error: Added to ${res.applied} projects; ${skipped} skipped due to overlap.` : `✓ Added time block to ${res.applied} projects`;
       toast(skipped
         ? `Added to ${res.applied} project(s), skipped ${skipped} (would overlap)`
         : `Added to ${res.applied} project(s)`, skipped ? "err" : "ok");
@@ -992,9 +1004,15 @@ async function saveBlock() {
     renderBlockTable();
     $("#schDeleteAll").classList.toggle("hidden", editingProject().blocks.length === 0);
     toast(wasEditing ? "Time block updated" : "Time block added");
+    $('#blockError').classList.add('success-text');
+    $('#blockError').textContent = wasUpdating ? '✓ Updated time block' : '✓ Added time block';
     loadLogs();
   } catch (err) {
-    $("#blockError").textContent = err.message;
+    $("#blockError").textContent = `✕ Error: ${err.message}`;
+  } finally {
+    clearTimeout(loadingTimer);
+    loading.classList.add('hidden');
+    $('#blockSave').disabled = false;
   }
 }
 
@@ -1466,10 +1484,10 @@ async function initAfterLogin() {
 const RESPONSE_WARNING_ICON = 'M12 2 1 21h22L12 2Zm-1 6h2v7h-2V8Zm0 9h2v2h-2v-2Z';
 const responseNumber = value => value === null || value === undefined ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 0 });
 function responseWarning(response) {
-  const text = response.percentage === null ? 'Usage alert' : `${responseNumber(response.percentage)}% used`;
+  const text = 'Usage alert';
   const badge = el('span', 'response-warning', text);
   badge.prepend(icon(RESPONSE_WARNING_ICON));
-  badge.title = 'Project usage has reached 70% of its monthly prediction.';
+  badge.title = `Actual usage is above 70% of the monthly estimate (${responseNumber(response.used)} / ${responseNumber(response.monthlyPredicted)}).`;
   return badge;
 }
 function projectUsageLabel(response) {
@@ -1481,15 +1499,27 @@ function projectUsageLabel(response) {
 function renderResponseOverview() {
   const host = $('#responseOverview');
   if (!host || !state?.responses) return;
-  const r = state.responses;
+  const view = $(activeProjectId ? '#projectView' : '#projectsView');
+  const toolbar = view.querySelector('.toolbar');
+  let controls = view.querySelector('.sticky-list-controls');
+  if (!controls) {
+    controls = el('div', 'sticky-list-controls');
+    toolbar.before(controls);
+    controls.append(toolbar);
+  }
+  controls.prepend(host);
   host.replaceChildren();
+  host.append(responseUsageSummary(), responsePeriodSwitch());
+}
+function responseUsageSummary() {
+  const r = state.responses;
   const summary = el('div', 'response-compact-summary');
   const used = el('span');
   used.append(el('b', null, responseNumber(r.used)), document.createTextNode(` / ${responseNumber(r.limit)} used`));
   used.title = `Official Promptwatch consumption. Tracking allowance: ${responseNumber(r.limit)}. Account limit: ${responseNumber(r.providerLimit)}.`;
   const remaining = el('span', null, `${responseNumber(r.remaining)} left`);
   summary.append(used, remaining);
-  host.append(summary, responsePeriodSwitch());
+  return summary;
 }
 function responsePeriodSwitch() {
   const switcher = el('div', 'response-switch');

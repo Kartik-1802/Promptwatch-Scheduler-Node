@@ -210,6 +210,7 @@
     <!-- ALL MONITORS (flat, across every project — view/activate only; scheduling is project-level, see Projects) -->
     <section id="tab-allmonitors" class="panel hidden">
       <div class="stats-block one" id="allMonStatsBlock"></div>
+      <div class="sticky-list-controls">
       <div id="allResponsePeriod" class="all-response-period"></div>
       <div class="toolbar">
         <label class="search grow" style="max-width:420px">
@@ -221,6 +222,7 @@
         <button id="allMonAddByIdBtn" class="btn"><svg><use href="#i-plus"></use></svg>Add by ID</button>
       </div>
 
+      </div>
       <div id="allMonAdoptRow" class="card hidden">
         <div class="card-head">
           <div class="card-icon"><svg><use href="#i-plus"></use></svg></div>
@@ -427,6 +429,7 @@
     <p id="modalSub" class="muted small"></p>
 
     <div class="block-form">
+      <div id="blockLoading" class="block-loading hidden" role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span>Adding time block</div>
       <div class="section-label" id="blockFormLabel">New time block</div>
       <div class="block-grid">
         <label class="field">Start day
@@ -456,7 +459,7 @@
       <p class="hint">Blocks may span multiple days, and the end can be earlier in the week than the
         start — that means the window wraps past Sunday into next Monday (e.g. Fri → Mon covers the
         whole weekend). Blocks on the same project must not overlap or touch each other.</p>
-      <p id="blockError" class="hint err-text"></p>
+      <p id="blockError" class="hint err-text" role="status" aria-live="polite"></p>
       <div id="blockPreview" class="block-preview hidden"></div>
     </div>
 

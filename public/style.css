@@ -1029,3 +1029,20 @@ textarea.input { height: auto; padding: var(--s-sm) var(--s-md); font-family: va
 .formula-form .formula-auto { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .formula-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .formula-preview { font-weight: 600; font-size: 14px; }
+
+.sticky-list-controls { position: sticky; top: var(--topbar-h); z-index: 30; background: var(--surface); padding: 16px 0 1px; }
+.sticky-list-controls .response-overview { margin-bottom: 16px; }
+.pname .formula-info { margin-left: 8px; vertical-align: middle; }
+.block-form { position: relative; }
+.block-loading { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 12px; background: rgb(248 250 252 / 95%); border-radius: 12px; font-weight: 600; }
+.loading-spinner { width: 20px; height: 20px; border: 2px solid #cbd5e1; border-top-color: var(--brand); border-radius: 50%; animation: block-spin .8s linear infinite; }
+@keyframes block-spin { to { transform: rotate(360deg); } }
+#blockError.success-text { color: #15803d; }
+@media (prefers-reduced-motion: reduce) { .loading-spinner { animation: none; } }
+.project-name-info { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.project-name-heading { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.project-name-heading .prow-open { flex: 0 1 auto; min-width: 0; width: auto; }
+.project-name-heading > .chev { width: 16px; height: 16px; color: var(--ink-muted); opacity: 0; }
+.prow:hover .project-name-heading > .chev { opacity: 1; }
+.project-name-heading .formula-info-button, .mname .formula-info-button { width: 16px; height: 16px; font-size: 10px; }
+#allResponsePeriod { justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; }

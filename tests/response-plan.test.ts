@@ -34,13 +34,14 @@ test('inverted blocks are ON outside their OFF window', () => {
 test('paused scheduler forecasts current manual state', () => {
   assert.equal(weeklyResponses([monitor], blocks, false), 140);
 });
-test('warning begins at exactly 70%, continues above it, handles zero prediction', () => {
+test('warning appears only above 70% of a positive monthly prediction', () => {
   assert.equal(predictionAlert(699, 1000), false);
-  assert.equal(predictionAlert(700, 1000), true);
+  assert.equal(predictionAlert(700, 1000), false);
+  assert.equal(predictionAlert(701, 1000), true);
   assert.equal(predictionAlert(1100, 1000), true);
   assert.equal(predictionAlert(null, 1000), false);
   assert.equal(predictionAlert(0, 0), false);
-  assert.equal(predictionAlert(1, 0), true);
+  assert.equal(predictionAlert(1, 0), false);
 });
 test('timezone date boundaries handle DST and calendar arithmetic', () => {
   assert.equal(midnight('2026-10-06', tz).toISOString(), '2026-10-05T18:30:00.000Z');

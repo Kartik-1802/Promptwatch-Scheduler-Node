@@ -65,7 +65,7 @@ export function weeklyResponses(monitors: PlanMonitor[], blocks: PlanBlock[], au
   return projectFormula(monitors, blocks, automated).weekly;
 }
 export function predictionAlert(used: number | null, predicted: number) {
-  return used !== null && used > 0 && (predicted === 0 || used / predicted >= 0.7);
+  return used !== null && predicted > 0 && used / predicted > 0.7;
 }
 
 /** Any partial remaining day counts as one full day; response counts round up too. */
