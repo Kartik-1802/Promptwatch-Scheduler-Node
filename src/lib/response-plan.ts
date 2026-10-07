@@ -1,4 +1,4 @@
-/** Calendar-date arithmetic: reset dates are exclusive; one run per active date. */
+/** Response planning: one expected run per 24 hours, rounded up per active window. */
 export const RESPONSE_LIMIT = 10_000;
 export function dateKey(now: Date, timezone: string): string {
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
@@ -45,44 +45,35 @@ export function midnight(key: string, timezone: string): Date {
 export type PlanBlock = { startDay: number; startTime: string; endDay: number; endTime: string; trigger: string };
 export type PlanMonitor = { active: boolean; promptCount: number | null; models: string[]; overrideUntil?: string | null };
 const minute = (day: number, time: string) => day * 1440 + Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-function scheduledOn(blocks: PlanBlock[], at: number): boolean {
-  const open = blocks.find(b => {
-    const start = minute(b.startDay, b.startTime), end = minute(b.endDay, b.endTime);
-    return end > start ? at >= start && at < end : at >= start || at < end;
-  });
-  return open ? open.trigger !== 'off_on' : blocks.every(b => b.trigger === 'off_on');
+const WEEK_MINUTES = 7 * 1440;
+function blockDuration(block: PlanBlock) {
+  const start = minute(block.startDay, block.startTime);
+  const end = minute(block.endDay, block.endTime);
+  return end > start ? end - start : WEEK_MINUTES - start + end;
 }
-/** Any ON portion of a day counts once, including overnight and inverted blocks. */
-export function runOnDate(m: PlanMonitor, blocks: PlanBlock[], key: string, timezone: string, automated = true): boolean {
-  if (!blocks.length || !automated) return m.active;
-  const start = weekday(key) * 1440;
-  const points = new Set([0]);
-  for (const b of blocks) {
-    for (const n of [minute(b.startDay, b.startTime), minute(b.endDay, b.endTime)]) {
-      if (n >= start && n < start + 1440) points.add(n - start);
-    }
+/** Round each separate active window up to 24-hour runs, then add them. */
+export function expectedWeeklyRuns(blocks: PlanBlock[]): number {
+  if (!blocks.length) return 7;
+  if (blocks.every(b => b.trigger === 'off_on')) {
+    // Inverted schedules are ON in the gaps between their OFF blocks.
+    // Treat the week as a circle so Sunday→Monday never splits one window.
+    const ordered = [...blocks].sort((a, b) => minute(a.startDay, a.startTime) - minute(b.startDay, b.startTime));
+    return ordered.reduce((runs, block, index) => {
+      const end = minute(block.startDay, block.startTime) + blockDuration(block);
+      const next = ordered[(index + 1) % ordered.length];
+      const nextStart = minute(next.startDay, next.startTime) + (index === ordered.length - 1 ? WEEK_MINUTES : 0);
+      return runs + Math.ceil(Math.max(0, nextStart - end) / 1440);
+    }, 0);
   }
-  let holdEnd = -1;
-  if (m.overrideUntil) {
-    const until = new Date(m.overrideUntil);
-    const holdDate = dateKey(until, timezone);
-    if (key < holdDate) return m.active;
-    if (key === holdDate) {
-      const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(until);
-      holdEnd = Number(parts.find(p => p.type === 'hour')!.value) * 60 + Number(parts.find(p => p.type === 'minute')!.value);
-      points.add(holdEnd);
-    }
-  }
-  return [...points].some(p => p < holdEnd ? m.active : scheduledOn(blocks, start + p));
+  // Mixed triggers default OFF outside blocks, as the scheduler does.
+  return blocks.filter(b => b.trigger !== 'off_on').reduce((runs, block) => runs + Math.ceil(blockDuration(block) / 1440), 0);
 }
-export function planResponses(monitors: PlanMonitor[], blocks: PlanBlock[], start: string, end: string, timezone: string, automated = true, respectHolds = false): number {
-  let total = 0;
-  for (let date = start; date < end; date = addDays(date, 1)) {
-    for (const m of monitors) {
-      if (runOnDate(respectHolds ? m : { ...m, overrideUntil: null }, blocks, date, timezone, automated)) total += Math.max(0, m.promptCount ?? 0) * m.models.length;
-    }
-  }
-  return total;
+export function weeklyResponses(monitors: PlanMonitor[], blocks: PlanBlock[], automated = true): number {
+  const scheduledRuns = expectedWeeklyRuns(blocks);
+  return monitors.reduce((total, monitor) => {
+    const runs = blocks.length && automated ? scheduledRuns : monitor.active ? 7 : 0;
+    return total + Math.max(0, monitor.promptCount ?? 0) * monitor.models.length * runs;
+  }, 0);
 }
 export function predictionAlert(used: number | null, predicted: number) {
   return used !== null && used > 0 && (predicted === 0 || used / predicted >= 0.7);

@@ -61,3 +61,15 @@ test('shared weekly estimates always count a full week, including the reset week
   assert.equal(result.byMonitor.m.monthly, 560);
   assert.equal(result.byProject.p.weeklyPredicted, 140);
 });
+test('duration-based weekly runs feed monitor and project monthly estimates', () => {
+  const windows = [
+    { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' },
+    { startDay: 3, startTime: '09:00', endDay: 4, endTime: '09:00', trigger: 'on_off' },
+  ];
+  const result = summarizeResponses([{ ...project, blocks: windows }], [{ ...monitor, id: 'm', active: false, promptCount: 345, models: ['a'] }], timezone, true, now, []);
+  assert.equal(result.byMonitor.m.daily, 0);
+  assert.equal(result.byMonitor.m.weekly, 690);
+  assert.equal(result.byMonitor.m.monthly, 2760);
+  assert.equal(result.byProject.p.weeklyPredicted, 690);
+  assert.equal(result.byProject.p.monthlyPredicted, 2760);
+});

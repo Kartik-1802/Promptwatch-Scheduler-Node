@@ -1,46 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, midnight, planResponses, predictionAlert, responsePeriods, remainingPlan, runOnDate } from '../src/lib/response-plan';
+import { addDays, midnight, weeklyResponses, expectedWeeklyRuns, predictionAlert, responsePeriods, remainingPlan } from '../src/lib/response-plan';
 const tz = 'Asia/Kolkata';
 const monitor = { active: true, promptCount: 10, models: ['a', 'b'] };
 const blocks = [1, 3, 4].map(day => ({ startDay: day, endDay: day, startTime: '09:00', endTime: '17:00', trigger: 'on_off' }));
-test('Tue/Thu/Fri count three dates; multiple models multiply responses', () => {
-  assert.equal(planResponses([monitor], blocks, '2026-10-12', '2026-10-19', tz), 60);
+test('Tue/Thu/Fri count three separate blocks; multiple models multiply responses', () => {
+  assert.equal(weeklyResponses([monitor], blocks), 60);
 });
-test('manual ON counts seven dates and OFF contributes nothing', () => {
-  assert.equal(planResponses([monitor], [], '2026-10-12', '2026-10-19', tz), 140);
-  assert.equal(planResponses([{ ...monitor, active: false }], [], '2026-10-12', '2026-10-19', tz), 0);
+test('manual ON counts seven runs and OFF contributes nothing', () => {
+  assert.equal(weeklyResponses([monitor], []), 140);
+  assert.equal(weeklyResponses([{ ...monitor, active: false }], []), 0);
 });
 test('reset uses local midnight on the 6th, handles year rollover and leap February', () => {
   assert.equal(responsePeriods(new Date('2026-10-05T18:29:59Z'), tz).start, '2026-09-06');
   assert.equal(responsePeriods(new Date('2026-10-05T18:30:00Z'), tz).end, '2026-11-06');
   assert.equal(responsePeriods(new Date('2027-01-01T00:00:00Z'), tz).start, '2026-12-06');
-  assert.equal(planResponses([monitor], [], '2028-02-06', '2028-03-06', tz), 29 * 20);
-});
-test('monthly dates are counted exactly and reset day is excluded', () => {
-  assert.equal(planResponses([monitor], blocks, '2026-10-06', '2026-11-06', tz), 14 * 20);
 });
 test('multiple monitors are added and unknown counts do not invent responses', () => {
-  assert.equal(planResponses([monitor, { ...monitor, promptCount: 5 }], blocks, '2026-10-12', '2026-10-19', tz), 90);
-  assert.equal(planResponses([{ ...monitor, promptCount: null }], blocks, '2026-10-12', '2026-10-19', tz), 0);
+  assert.equal(weeklyResponses([monitor, { ...monitor, promptCount: 5 }], blocks), 90);
+  assert.equal(weeklyResponses([{ ...monitor, promptCount: null }], blocks), 0);
 });
-test('overnight, Sunday wrap, midnight-exclusive endings and duplicate day windows', () => {
+test('overnight and Sunday wrap count duration; separate same-day blocks round individually', () => {
   const overnight = [{ startDay: 6, endDay: 0, startTime: '23:00', endTime: '01:00', trigger: 'on_off' }];
-  assert.equal(planResponses([monitor], overnight, '2026-10-12', '2026-10-19', tz), 40);
-  assert.equal(planResponses([monitor], [{ ...overnight[0], endTime: '00:00' }], '2026-10-12', '2026-10-19', tz), 20);
-  assert.equal(planResponses([monitor], [blocks[0], { ...blocks[0], startTime: '19:00', endTime: '21:00' }], '2026-10-12', '2026-10-19', tz), 20);
+  assert.equal(weeklyResponses([monitor], overnight), 20);
+  assert.equal(weeklyResponses([monitor], [{ ...overnight[0], endTime: '00:00' }]), 20);
+  assert.equal(weeklyResponses([monitor], [blocks[0], { ...blocks[0], startTime: '19:00', endTime: '21:00' }]), 40);
 });
 test('inverted blocks are ON outside their OFF window', () => {
   const offWeekend = [{ startDay: 5, endDay: 0, startTime: '00:00', endTime: '00:00', trigger: 'off_on' }];
-  assert.equal(planResponses([monitor], offWeekend, '2026-10-12', '2026-10-19', tz), 100);
-});
-test('manual holds affect future prediction only until expiry', () => {
-  const held = { ...monitor, active: false, overrideUntil: '2026-10-13T12:00:00Z' };
-  assert.equal(runOnDate(held, blocks, '2026-10-13', tz), false);
-  assert.equal(runOnDate(held, blocks, '2026-10-15', tz), true);
+  assert.equal(weeklyResponses([monitor], offWeekend), 100);
 });
 test('paused scheduler forecasts current manual state', () => {
-  assert.equal(planResponses([monitor], blocks, '2026-10-12', '2026-10-19', tz, false), 140);
+  assert.equal(weeklyResponses([monitor], blocks, false), 140);
 });
 test('warning begins at exactly 70%, continues above it, handles zero prediction', () => {
   assert.equal(predictionAlert(699, 1000), false);
@@ -68,4 +59,41 @@ test('remaining forecast rounds partial days up, including 2.5 days to 3', () =>
   assert.deepEqual(remainingPlan(60, now, '2026-11-06T00:00:00Z'), { days: 3, responses: 26 });
   assert.deepEqual(remainingPlan(140, new Date('2026-11-06T00:00:00Z'), '2026-11-06T00:00:00Z'), { days: 0, responses: 0 });
   assert.deepEqual(remainingPlan(140, new Date('2026-11-04T00:00:00Z'), '2026-11-06T00:00:00Z'), { days: 2, responses: 40 });
+});
+
+test('two 24-hour blocks count two runs, regardless of crossing midnight', () => {
+  const twoDays = [
+    { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' },
+    { startDay: 3, startTime: '09:00', endDay: 4, endTime: '09:00', trigger: 'on_off' },
+  ];
+  assert.equal(expectedWeeklyRuns(twoDays), 2);
+  assert.equal(weeklyResponses([{ ...monitor, promptCount: 345, models: ['a'] }], twoDays), 690);
+});
+test('1 day + 1 day + 2 days 8 hours rounds each block to 1 + 1 + 3', () => {
+  const windows = [
+    { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' },
+    { startDay: 2, startTime: '14:00', endDay: 3, endTime: '14:00', trigger: 'on_off' },
+    { startDay: 4, startTime: '09:00', endDay: 6, endTime: '17:00', trigger: 'on_off' },
+  ];
+  assert.equal(expectedWeeklyRuns(windows), 5);
+  assert.equal(weeklyResponses([monitor], windows), 100);
+});
+test('rounding applies at 24-hour boundaries and across the end of the week', () => {
+  const block = { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' };
+  assert.equal(expectedWeeklyRuns([{ ...block, endTime: '08:59' }]), 1);
+  assert.equal(expectedWeeklyRuns([block]), 1);
+  assert.equal(expectedWeeklyRuns([{ ...block, endTime: '09:01' }]), 2);
+  assert.equal(expectedWeeklyRuns([{ ...block, startDay: 6, endDay: 0 }]), 1);
+});
+test('inverted ON gaps round individually, including a gap crossing Sunday', () => {
+  assert.equal(expectedWeeklyRuns([
+    { startDay: 1, startTime: '09:00', endDay: 2, endTime: '09:00', trigger: 'off_on' },
+    { startDay: 4, startTime: '09:00', endDay: 5, endTime: '09:00', trigger: 'off_on' },
+  ]), 5); // Wed→Fri = 2 days; Sat→Tue = 3 days
+});
+test('mixed-trigger schedules count only ON blocks, matching scheduler behavior', () => {
+  assert.equal(expectedWeeklyRuns([
+    { startDay: 0, startTime: '09:00', endDay: 1, endTime: '09:00', trigger: 'on_off' },
+    { startDay: 4, startTime: '09:00', endDay: 5, endTime: '09:00', trigger: 'off_on' },
+  ]), 1);
 });

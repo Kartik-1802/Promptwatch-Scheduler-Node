@@ -88,9 +88,8 @@ function estimateTotal(monitors) {
 }
 function estimateLabel() { return { daily: 'day', weekly: 'week', monthly: 'month' }[responsePeriod]; }
 function estimateHint() {
-  const r = state.responses;
   return responsePeriod === 'daily' ? 'Prompts × models for monitors currently ON.'
-    : responsePeriod === 'weekly' ? `Scheduled runs from ${r?.estimateWeekStart} to ${r?.estimateWeekEnd} (end excluded). One run per active date.`
+    : responsePeriod === 'weekly' ? 'Each active block’s duration ÷ 24 hours, rounded up separately. Prompts × models × expected runs.'
     : 'Weekly estimate × 4.';
 }
 function responseSummaryCard(monitors) {

@@ -1,7 +1,7 @@
 import type { ResponseUsage, ResponseUsageReport } from '@prisma/client';
 import { prisma } from './db';
 import { OrganizationUsage, PromptwatchClient } from './promptwatch';
-import { addDays, midnight, planResponses, predictionAlert, RESPONSE_LIMIT, responsePeriods, remainingPlan, weekday, PlanBlock, PlanMonitor } from './response-plan';
+import { addDays, midnight, weeklyResponses, predictionAlert, RESPONSE_LIMIT, responsePeriods, remainingPlan, weekday, PlanBlock, PlanMonitor } from './response-plan';
 
 const REFRESH_MS = 60 * 60_000;
 export type ProjectConsumption = { id: string; name: string; responses: number; cap: number | null };
@@ -81,7 +81,7 @@ export function summarizeResponses(projects: ProjectPlan[], monitors: MonitorPla
   const estimateWeekEnd = addDays(estimateWeekStart, 7);
   const byMonitor = Object.fromEntries(monitors.filter(m => m.id).map(m => {
     const blocks = projects.find(p => p.id === m.projectId)?.blocks ?? [];
-    const weekly = planResponses([m], blocks, estimateWeekStart, estimateWeekEnd, timezone, automated);
+    const weekly = weeklyResponses([m], blocks, automated);
     return [m.id!, {
       daily: m.active ? Math.max(0, m.promptCount ?? 0) * m.models.length : 0,
       weekly,
@@ -90,10 +90,9 @@ export function summarizeResponses(projects: ProjectPlan[], monitors: MonitorPla
   }));
   const byProject = Object.fromEntries(projects.map(project => {
     const own = monitors.filter(m => m.projectId === project.id);
-    const plan = (start: string, end: string, holds = false) => planResponses(own, project.blocks, start, end, timezone, automated, holds);
     const month = consumption.find(p => p.id === project.id);
     const week = find(project.id, period.weekStart, period.weekEnd);
-    const weekly = plan(estimateWeekStart, estimateWeekEnd);
+    const weekly = weeklyResponses(own, project.blocks, automated);
     const predicted = weekly * 4;
     const remaining = remainingPlan(weekly, now, period.resetAt).responses;
     const used = month?.responses ?? null;
