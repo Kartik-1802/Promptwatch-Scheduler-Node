@@ -1,3 +1,4 @@
+import { activityStart } from "@/lib/activity";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { MUTATE_ROLES, requireRole } from "@/lib/auth";
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
         // models is stored as a JSON-encoded string — see src/lib/json.ts.
         data.models = JSON.stringify(Array.isArray(data.models) ? data.models : []);
 
+        const previous = await prisma.monitor.findUnique({ where: { id: monitorId } });
+        data.activeSince = activityStart(previous, item.active ?? previous?.active ?? false);
         await prisma.monitor.upsert({
           where: { id: monitorId },
           create: { id: monitorId, ...data } as Prisma.MonitorUncheckedCreateInput,

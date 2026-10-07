@@ -7,6 +7,7 @@ const el = (tag, cls, text) => {
   return node;
 };
 
+let responsePeriod = "daily";
 let state = null;
 let session = null; // { email, role } | null
 let activeProjectId = null; // null = project list (homepage), or the open project's id
@@ -70,14 +71,36 @@ function monitorsInScope(projectId) {
   return state.monitors.filter((m) => m.projectId === projectId);
 }
 
-// Est. responses/day = Total Prompts × Number of Models, per monitor.
-// A project's total is the sum of that across its monitors — equal to
-// Prompts × Models × Monitor count when every monitor in the project matches.
+// Simple response estimate for monitors that are currently ON.
 function estResponses(monitor) {
-  return (monitor.promptCount ?? 0) * (monitor.models || []).length;
+  return monitor.active ? Math.max(0, monitor.promptCount ?? 0) * (monitor.models || []).length : 0;
 }
 function estResponsesTotal(monitors) {
-  return monitors.reduce((sum, m) => sum + estResponses(m), 0);
+  return monitors.reduce((sum, monitor) => sum + estResponses(monitor), 0);
+}
+function estimateFor(monitor) {
+  if (responsePeriod === 'daily') return estResponses(monitor);
+  return state.responses?.byMonitor?.[monitor.id]?.[responsePeriod] ?? null;
+}
+function estimateTotal(monitors) {
+  const values = monitors.map(estimateFor);
+  return values.some(v => v === null) ? null : values.reduce((sum, value) => sum + value, 0);
+}
+function estimateLabel() { return { daily: 'day', weekly: 'week', monthly: 'month' }[responsePeriod]; }
+function estimateHint() {
+  const r = state.responses;
+  return responsePeriod === 'daily' ? 'Prompts × models for monitors currently ON.'
+    : responsePeriod === 'weekly' ? `Scheduled runs from ${r?.estimateWeekStart} to ${r?.estimateWeekEnd} (end excluded). One run per active date.`
+    : 'Weekly estimate × 4.';
+}
+function responseSummaryCard(monitors) {
+  const card = kpiCard({
+    eyebrow: `Est. responses/${estimateLabel()}`,
+    value: responseNumber(estimateTotal(monitors)),
+    unit: responsePeriod === 'daily' ? 'ON monitors only' : responsePeriod === 'weekly' ? 'this week' : '4 weeks',
+  });
+  card.title = estimateHint();
+  return card;
 }
 
 function currentProject() {
@@ -155,6 +178,7 @@ const ICON_CLOCK = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 10.6V6h-2v7.4l5 3
 const ICON_TRASH = "M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1 12H7L6 9Z";
 
 function renderStats() {
+  renderResponseOverview();
   const project = currentProject();
   const monitors = monitorsInScope(activeProjectId);
   const activeCount = monitors.filter((m) => m.active).length;
@@ -163,6 +187,16 @@ function renderStats() {
 
   const block = $("#statsBlock");
   block.innerHTML = "";
+
+  if (!project) {
+    const projects = manageableProjects();
+    block.classList.add("minimal-stats");
+    block.append(kpiCard({eyebrow: "Projects", value: projects.length, unit: `${projects.filter(p => p.blocks.length).length} scheduled`}));
+    block.append(kpiCard({eyebrow: "Monitors on", value: activeCount, unit: `of ${monitors.length} monitors`}));
+    block.append(responseSummaryCard(monitors));
+    return;
+  }
+  block.classList.remove("minimal-stats");
 
   const stateBadge = monitors.length === 0
     ? { text: "No monitors", tone: "off" }
@@ -182,13 +216,7 @@ function renderStats() {
   }));
 
   if (project) {
-    block.append(kpiCard({
-      eyebrow: "Est. responses/day",
-      value: estResponsesTotal(monitors),
-      unit: "at current prompts × models",
-      footLeft: "Prompts × models, summed",
-      footRight: String(monitors.length) + (monitors.length === 1 ? " monitor" : " monitors"),
-    }));
+    block.append(responseSummaryCard(monitors));
     const next = project.nextTransition;
     block.append(kpiCard({
       eyebrow: "Time blocks",
@@ -235,11 +263,11 @@ function renderStats() {
       footRight: String(state.monitors.length),
     }));
     block.append(kpiCard({
-      eyebrow: "Est. responses/day",
+      eyebrow: "Est. responses",
       value: estResponsesTotal(state.monitors),
-      unit: "across all projects",
-      footLeft: "Prompts × models, summed",
-      footRight: String(state.monitors.length) + (state.monitors.length === 1 ? " monitor" : " monitors"),
+      unit: "from ON monitors",
+      footLeft: "Daily / weekly / monthly forecasts",
+      footRight: `${activeCount} ON monitors`,
     }));
   }
 }
@@ -281,37 +309,62 @@ function renderProjects() {
 
   const liveIds = new Set(visible.map((p) => p.id));
   [...selectedProjects].forEach((id) => { if (!liveIds.has(id)) selectedProjects.delete(id); });
-  renderProjectSelectBar(visible);
+
 
   visible.forEach((p) => {
     const row = el("div", `prow${selectedProjects.has(p.id) ? " sel" : ""}`);
 
-    const check = el("input");
-    check.type = "checkbox";
-    check.className = "rowcheck";
-    check.checked = selectedProjects.has(p.id);
-    check.setAttribute("aria-label", `Select ${p.name}`);
-    check.onchange = () => {
-      check.checked ? selectedProjects.add(p.id) : selectedProjects.delete(p.id);
-      renderProjects();
+    const own = monitorsInScope(p.id);
+    const allOn = own.length > 0 && own.every((m) => m.active);
+    const partial = !allOn && own.some(m => m.active);
+    const toggleWrap = el("div", "toggle-wrap");
+    const toggle = el("button", `toggle${allOn ? " on" : partial ? " partial" : ""}`);
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-checked", String(allOn));
+    toggle.setAttribute("aria-label", `Turn ${allOn ? "off" : "on"} all monitors in ${p.name}`);
+    toggle.append(el("span", "knob"));
+    toggle.disabled = !canMutate() || !own.length;
+    toggle.onclick = async () => {
+      toggle.disabled = true;
+      try {
+        const res = await api("/api/monitors/active-bulk", {
+          method: "POST", body: { monitorIds: own.map((m) => m.id), active: !allOn },
+        });
+        apply(res.state);
+        toast(res.failed.length ? `${res.changed.length} updated; ${res.failed.length} failed` : `${p.name} is now ${allOn ? "OFF" : "ON"}`, res.failed.length ? "err" : undefined);
+      } catch (err) { toast(err.message, "err"); }
+      finally { toggle.disabled = !canMutate(); }
     };
-    row.append(check);
+    toggleWrap.append(toggle, el("span", `toggle-state ${allOn ? "on" : "off"}`, allOn || partial ? "ON" : "OFF"));
+    row.append(toggleWrap);
 
     const open = el("button", "prow-open");
     open.setAttribute("aria-label", `Open ${p.name}`);
     const lead = el("span", "lead");
     lead.append(el("span", "pname", p.name));
-    const bits = [`${p.monitorCount} monitor${p.monitorCount === 1 ? "" : "s"}`, `${p.activeCount} on`];
-    if (p.website) bits.push(p.website.replace(/^https?:\/\//, ""));
-    lead.append(el("span", "meta", bits.join(" · ")));
+    const activeCount = own.filter(m => m.active).length;
+    const count = own.length;
+    const activity = el("span", `project-activity ${activeCount ? "has-active" : "all-off"}`);
+    activity.append(el("span", "activity-count", `${activeCount} of ${count} ${count === 1 ? "monitor" : "monitors"} active`));
+    const track = el("span", "activity-track");
+    track.setAttribute("aria-hidden", "true");
+    const fill = el("span", "activity-fill");
+    fill.style.width = `${count ? (activeCount / count) * 100 : 0}%`;
+    track.append(fill);
+    activity.append(track);
+    lead.append(activity);
+    const response = state.responses?.byProject[p.id];
+    if (response) lead.append(projectUsageLabel(response));
+    if (partial) lead.append(el("span", "partial-label", "Partial monitors on"));
     open.append(lead);
     open.append(icon(ICON_CHEVRON, "ico chev"));
     open.onclick = () => openProject(p.id);
     row.append(open);
 
     const est = el("div", "prow-est");
-    est.append(el("b", null, String(estResponsesTotal(monitorsInScope(p.id)))));
-    est.append(el("span", null, "responses/day"));
+    est.append(el("b", null, responseNumber(estimateTotal(monitorsInScope(p.id)))));
+    est.append(el("span", null, `est. responses/${estimateLabel()}`));
+    est.title = estimateHint();
     row.append(est);
 
     const mid = el("div", "prow-sched");
@@ -321,6 +374,7 @@ function renderProjects() {
 
     const actions = el("div", "prow-actions");
     const sched = el("button", "btn primary", p.blocks.length ? "Edit schedule" : "Add schedule");
+    sched.setAttribute("aria-label", `${p.blocks.length ? "Edit" : "Add"} schedule for ${p.name}`);
     sched.prepend(useIcon("i-calendar"));
     sched.disabled = !canMutate();
     sched.onclick = () => openEditor(p);
@@ -350,7 +404,6 @@ function renderProjectSelectBar(visibleRows) {
 function openProject(id) {
   activeProjectId = id;
   selectedMonitors.clear();
-  $("#crumbs").classList.remove("hidden");
   $("#projectsView").classList.add("hidden");
   $("#projectView").classList.remove("hidden");
   const project = state.projects.find((p) => p.id === id);
@@ -367,13 +420,12 @@ function openProject(id) {
 function backToProjects() {
   activeProjectId = null;
   selectedMonitors.clear();
-  $("#crumbs").classList.add("hidden");
   $("#projectView").classList.add("hidden");
   $("#projectsView").classList.remove("hidden");
   $("#pageEyebrow").textContent = "Hub control plane";
   $("#pageTitle").textContent = "Projects";
   $("#crumbHere").textContent = "Monitor & Scheduler Hub";
-  $("#pageSub").textContent = "Every project and its schedule. Open one to see its monitors.";
+  $("#pageSub").textContent = "Manage monitors and schedules in one place.";
   renderStats();
   renderProjects();
 }
@@ -400,6 +452,8 @@ function renderProjectScheduleBar() {
     `Applies to all ${project.monitorCount} monitor${project.monitorCount === 1 ? "" : "s"} in this project. ` +
     "Blocks can't overlap or touch each other."));
   body.append(scheduleSummary(project));
+  const response = state.responses?.byProject[project.id];
+  if (response) body.append(projectUsageLabel(response));
   left.append(body);
   bar.append(left);
 
@@ -429,7 +483,7 @@ function renderMonitors() {
 
   list.innerHTML = "";
   $("#emptyMonitors").classList.toggle("hidden", rows.length > 0);
-  renderSelectBar(rows);
+
   rows.forEach((m) => list.append(monitorRow(m, selectedMonitors, renderMonitors)));
 }
 
@@ -451,19 +505,8 @@ function renderSelectBar(visibleRows) {
 
 // ---------- all monitors (flat, across every project) ----------
 // View/activate only — scheduling always happens on the Projects tab.
-function monitorRow(m, selectedSet, onToggleRerender) {
+function monitorRow(m, selectedSet, onToggleRerender, summaryPeriod = false) {
   const row = el("div", `mrow${selectedSet.has(m.id) ? " sel" : ""}`);
-
-  const check = el("input");
-  check.type = "checkbox";
-  check.className = "rowcheck";
-  check.checked = selectedSet.has(m.id);
-  check.setAttribute("aria-label", `Select ${m.name}`);
-  check.onchange = () => {
-    check.checked ? selectedSet.add(m.id) : selectedSet.delete(m.id);
-    onToggleRerender();
-  };
-  row.append(check);
 
   const lead = el("div", "lead");
   const name = el("div", "mname");
@@ -471,6 +514,11 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   name.append(el("span", `badge ${m.active ? "on" : "off"}`, m.active ? "Active" : "Idle"));
   if (m.overrideUntil) name.append(el("span", "badge brand", "Manual hold"));
   if (m.staleSince) name.append(el("span", "badge warnb", "Sync issue"));
+  const response = state.responses?.byProject[m.projectId];
+  if (response?.alert) {
+    name.append(responseWarning(response));
+    row.classList.add("response-alert-row");
+  }
   lead.append(name);
 
   const meta = el("div", "meta");
@@ -500,8 +548,9 @@ function monitorRow(m, selectedSet, onToggleRerender) {
   row.append(cadence);
 
   const est = el("div", "mrow-est");
-  est.append(el("b", null, String(estResponses(m))));
-  est.append(el("span", null, "responses/day"));
+  est.append(el("b", null, responseNumber(estimateFor(m))));
+  est.append(el("span", null, `est. responses/${estimateLabel()}`));
+  est.title = estimateHint();
   row.append(est);
 
   const toggleWrap = el("div", "toggle-wrap");
@@ -521,8 +570,10 @@ function monitorRow(m, selectedSet, onToggleRerender) {
     } catch (err) { toast(err.message, "err"); }
     finally { toggle.disabled = !canMutate(); }
   };
-  toggleWrap.append(stateLabel, toggle);
-  row.append(toggleWrap);
+  toggleWrap.append(toggle, stateLabel);
+  if (summaryPeriod) row.append(toggleWrap);
+  else row.prepend(toggleWrap);
+
 
   const delBtn = el("button", "iconbtn danger");
   delBtn.title = `Remove ${m.name} from tracking`;
@@ -547,6 +598,7 @@ function monitorRow(m, selectedSet, onToggleRerender) {
 }
 
 function renderAllMonitors() {
+  $("#allResponsePeriod").replaceChildren(responsePeriodSwitch());
   const term = $("#allMonSearch").value.trim().toLowerCase();
   const onlyInactive = $("#allMonInactiveOnly").checked;
 
@@ -589,19 +641,13 @@ function renderAllMonitors() {
     footLeft: "Showing here",
     footRight: `${rows.length} row${rows.length === 1 ? "" : "s"}`,
   }));
-  statsBlock.append(kpiCard({
-    eyebrow: "Est. responses/day",
-    value: estResponsesTotal(state.monitors),
-    unit: "across all monitors",
-    footLeft: "Prompts × models, summed",
-    footRight: `${total} total`,
-  }));
+  statsBlock.append(responseSummaryCard(state.monitors));
 
   const list = $("#allMonitorList");
   list.innerHTML = "";
   $("#allMonEmpty").classList.toggle("hidden", rows.length > 0);
-  renderAllMonSelectBar(rows);
-  rows.forEach((m) => list.append(monitorRow(m, selectedAllMonitors, renderAllMonitors)));
+
+  rows.forEach((m) => list.append(monitorRow(m, selectedAllMonitors, renderAllMonitors, true)));
 }
 
 function renderAllMonSelectBar(visibleRows) {
@@ -1172,7 +1218,10 @@ function activateTab(name) {
 }
 
 document.querySelectorAll(".side-btn[data-tab]").forEach((tab) => {
-  tab.onclick = () => activateTab(tab.dataset.tab);
+  tab.onclick = () => {
+    if (tab.dataset.tab === "monitors") activeProjectId = null;
+    activateTab(tab.dataset.tab);
+  };
 });
 
 // Clicking the logo always returns to the Projects list — the dashboard
@@ -1183,8 +1232,9 @@ $("#homeLink").onclick = (e) => {
   activateTab("monitors");
 };
 
+$("#promptwatchHome").onclick = $("#homeLink").onclick;
+
 $("#projectSearch").oninput = renderProjects;
-$("#backToProjects").onclick = backToProjects;
 $("#search").oninput = renderMonitors;
 $("#allMonSearch").oninput = renderAllMonitors;
 $("#allMonInactiveOnly").onchange = renderAllMonitors;
@@ -1407,3 +1457,51 @@ async function initAfterLogin() {
     showLogin();
   }
 })();
+
+// ---------- compact response tracking ----------
+const RESPONSE_WARNING_ICON = 'M12 2 1 21h22L12 2Zm-1 6h2v7h-2V8Zm0 9h2v2h-2v-2Z';
+const responseNumber = value => value === null || value === undefined ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+function responseWarning(response) {
+  const text = response.percentage === null ? 'Usage alert' : `${responseNumber(response.percentage)}% used`;
+  const badge = el('span', 'response-warning', text);
+  badge.prepend(icon(RESPONSE_WARNING_ICON));
+  badge.title = 'Project usage has reached 70% of its monthly prediction.';
+  return badge;
+}
+function projectUsageLabel(response) {
+  const label = el('span', 'project-usage', `${responseNumber(response.used)} responses used this cycle`);
+  label.title = response.observedAt ? `Official Promptwatch usage · Updated ${new Date(response.observedAt).toLocaleString()}` : 'Official usage is not available yet';
+  if (response.alert) label.append(responseWarning(response));
+  return label;
+}
+function renderResponseOverview() {
+  const host = $('#responseOverview');
+  if (!host || !state?.responses) return;
+  const r = state.responses;
+  host.replaceChildren();
+  const summary = el('div', 'response-compact-summary');
+  const used = el('span');
+  used.append(el('b', null, responseNumber(r.used)), document.createTextNode(` / ${responseNumber(r.limit)} used`));
+  used.title = `Official Promptwatch consumption. Tracking allowance: ${responseNumber(r.limit)}. Account limit: ${responseNumber(r.providerLimit)}.`;
+  const remaining = el('span', null, `${responseNumber(r.remaining)} left`);
+  summary.append(used, remaining);
+  host.append(summary, responsePeriodSwitch());
+}
+function responsePeriodSwitch() {
+  const switcher = el('div', 'response-switch');
+  switcher.setAttribute('role', 'group');
+  switcher.setAttribute('aria-label', 'Estimate period for all projects and monitors');
+  for (const period of ['daily', 'weekly', 'monthly']) {
+    const button = el('button', `btn${responsePeriod === period ? ' primary' : ''}`, period[0].toUpperCase() + period.slice(1));
+    button.setAttribute('aria-pressed', String(responsePeriod === period));
+    button.onclick = () => {
+      responsePeriod = period;
+      renderStats();
+      if (activeProjectId) { renderProjectScheduleBar(); renderMonitors(); } else renderProjects();
+      if (!$('#tab-allmonitors').classList.contains('hidden')) renderAllMonitors();
+    };
+    switcher.append(button);
+  }
+  return switcher;
+}
+

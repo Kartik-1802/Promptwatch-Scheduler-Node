@@ -1,4 +1,5 @@
-/** Window evaluation + the background loop that flips monitors on and off.
+import { activityStart } from "./activity";
+/** Window evaluation + the background loop that syncs and applies schedules.
  * Mirrors scheduler.py. Runs inside the standalone worker process
  * (scripts/worker.ts) via setTimeout recursion — needs a persistent Node
  * process, not serverless/edge.
@@ -13,6 +14,7 @@
 import { prisma } from "./db";
 import { ApiError, PromptwatchClient } from "./promptwatch";
 import { log } from "./store";
+import { runSync } from "./sync";
 import { partsAt } from "./tz";
 
 const RETRY_BACKOFF_MS = 5 * 60 * 1000;
@@ -214,7 +216,7 @@ export async function tick(force = false, actor = "Scheduler") {
 
       await prisma.monitor.update({
         where: { id: monitor.id },
-        data: { active: desired, nextRetryAt: null },
+        data: { active: desired, activeSince: activityStart(monitor, desired), nextRetryAt: null },
       });
       succeeded++;
       changes.push({ monitorId: monitor.id, active: desired });
@@ -251,14 +253,32 @@ let intervalHandle: ReturnType<typeof setTimeout> | null = null;
 export function startSchedulerLoop() {
   if (intervalHandle) return; // already running (e.g. hot reload in dev)
   const runOnce = async () => {
+    let seconds = 60;
     try {
-      await tick();
+      const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+      seconds = Math.max(10, settings?.tickSeconds ?? 60);
+
+      if (settings?.schedulerEnabled && settings.apiKey) {
+        try {
+          const { error } = await runSync("Scheduler");
+          if (error) {
+            await log("error", "sync", `Automatic sync failed: ${error}`, { user: "Scheduler" });
+          }
+        } catch (err) {
+          await log("error", "sync", `Automatic sync failed: ${(err as Error).message}`, { user: "Scheduler" });
+        }
+      }
+
+      try {
+        await tick();
+      } catch (err) {
+        await log("error", "scheduler", `Tick failed: ${(err as Error).message}`);
+      }
     } catch (err) {
-      await log("error", "scheduler", `Tick failed: ${(err as Error).message}`);
+      await log("error", "scheduler", `Worker cycle failed: ${(err as Error).message}`);
+    } finally {
+      intervalHandle = setTimeout(runOnce, seconds * 1000);
     }
-    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
-    const seconds = Math.max(10, settings?.tickSeconds ?? 60);
-    intervalHandle = setTimeout(runOnce, seconds * 1000);
   };
   runOnce();
 }

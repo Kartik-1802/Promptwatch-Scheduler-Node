@@ -38,6 +38,12 @@ export interface PromptwatchMonitor {
   [key: string]: unknown;
 }
 
+export interface OrganizationUsage {
+  period: { from: string; to: string } | null;
+  organization: { promptResponses: { current: number; limit: number; resetsAt: string | null } };
+  projects: Array<{ id: string; name: string; usage: { promptResponses: { current: number; cap: number | null } } }>;
+}
+
 export class PromptwatchClient {
   constructor(private apiKey: string) {}
 
@@ -110,6 +116,19 @@ export class PromptwatchClient {
       }
     }
     throw lastErr ?? new ApiError(0, "Unknown error");
+  }
+
+  async getOrganizationUsage(): Promise<OrganizationUsage> {
+    return this.request<OrganizationUsage>("GET", "/usage");
+  }
+
+  // Read-only count with exact timezone-aware boundaries; no response text is stored.
+  async countResponses(projectId: string, from: string, until: string): Promise<number> {
+    const data = await this.request<{ total: number }>("GET", "/responses", {
+      projectId, params: { page: 1, size: 1, from, until },
+    });
+    if (!Number.isSafeInteger(data?.total) || data.total < 0) throw new Error("Promptwatch returned an invalid response count.");
+    return data.total;
   }
 
   async listProjects(): Promise<PromptwatchProject[]> {

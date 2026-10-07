@@ -1,3 +1,4 @@
+import { activityStart } from "./activity";
 /** Pull projects + monitors from Promptwatch into the local database. Mirrors sync.py.
  *
  * Our own DB is the persisted inventory of managed monitors, not Promptwatch's
@@ -134,7 +135,7 @@ export async function runSync(actor = "System") {
       const item = await client.getMonitor(monitor.projectId, monitor.id);
       await prisma.monitor.update({
         where: { id: monitor.id },
-        data: { seenAt: new Date(), staleSince: null, ...monitorData(item) },
+        data: { seenAt: new Date(), staleSince: null, ...monitorData(item), activeSince: activityStart(monitor, item.active ?? monitor.active) },
       });
       refreshedCount++;
     } catch (err) {
@@ -197,7 +198,7 @@ async function createMonitor(
     errors.push(`${projectName} (monitor ${monitorId} detail fetch): ${apiErr.message}`);
   }
   await prisma.monitor.create({
-    data: { id: monitorId, projectId, projectName, seenAt: new Date(), ...monitorData(item!) } as Prisma.MonitorUncheckedCreateInput,
+    data: { id: monitorId, projectId, projectName, seenAt: new Date(), ...monitorData(item!), activeSince: activityStart(null, Boolean(item!.active)) } as Prisma.MonitorUncheckedCreateInput,
   });
   return true;
 }

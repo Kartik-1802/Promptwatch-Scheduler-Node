@@ -6,10 +6,10 @@ when it closes, every week, on its own. Built with Node.js, TypeScript, Next.js,
 
 ## What it does
 
-- **Automatic scheduling** — set a weekly activation window per monitor (e.g. weekdays
+- **Automatic scheduling and sync** — set a weekly activation window per monitor (e.g. weekdays
   09:00–17:00). Supports overnight windows that wrap past midnight, and all-day windows.
-  A background process checks continuously and activates/deactivates monitors through the
-  Promptwatch API exactly when their window opens or closes.
+  When enabled and an API key is saved, the background worker syncs projects and monitor state
+  from Promptwatch, then applies schedules on each configured interval (60 seconds by default).
 - **Bulk actions** — select multiple monitors at once to schedule, activate, deactivate, or
   clear schedules together.
 - **Finds every monitor, not just active ones** — Promptwatch's own API only lists active
@@ -29,12 +29,12 @@ when it closes, every week, on its own. Built with Node.js, TypeScript, Next.js,
 | Piece | What it is |
 |---|---|
 | `app` | The Next.js web app — serves the dashboard and every `/api/*` route |
-| `worker` | A background process that runs the scheduling loop |
+| `worker` | A background process that syncs monitor state and runs the scheduling loop |
 | `db` | PostgreSQL — a separate database server, shared by `app` and `worker` |
 
-The **app** and **worker** are two independent processes sharing one database. That
-separation means restarting or updating the web app never interrupts the automatic scheduling
-running in the worker, and vice versa.
+The **app** and **worker** are two independent processes sharing one database. That separation
+means restarting or updating the web app never interrupts the automatic scheduling or syncing
+running in the worker.
 
 ## Run it locally with Docker (recommended)
 
@@ -46,7 +46,8 @@ docker compose up --build     # dashboard at http://localhost:3000
 ```
 
 This brings up three services: `db` (Postgres, with its data in a named volume so it survives
-restarts and rebuilds), `app` (the dashboard, on port 3000), and `worker` (the scheduling loop).
+restarts and rebuilds), `app` (the dashboard, on port 3000), and `worker` (the sync and
+scheduling loop).
 `app` runs `prisma db push` against `db` on startup to keep the schema in sync; `worker` waits
 for `app` to be healthy before starting, so it never races `app` to set up the schema.
 
@@ -72,7 +73,7 @@ cp .env.example .env          # DATABASE_URL already points at localhost:5432 by
 npx prisma db push            # creates the tables
 npm run dev                   # dashboard at http://localhost:3000
 
-# in a second terminal — the scheduler loop
+# in a second terminal — automatic sync and scheduling (every 60 seconds by default)
 npm run worker
 ```
 

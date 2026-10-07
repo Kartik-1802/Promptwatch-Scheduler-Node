@@ -54,6 +54,7 @@ model Monitor {
   name              String
   description       String?
   active            Boolean
+  activeSince       DateTime? // Start of the current observed continuous ON period
   models            String    @default("[]") // JSON-encoded string[] — see src/lib/json.ts
   languageCode      String?
   countryCode       String?
@@ -125,4 +126,49 @@ model ApiCallLog {
   error  String?
 
   @@index([ts])
+}
+
+// Immutable observations survive local monitor removal. These are estimates,
+// not Promptwatch's actual response delivery or billing records.
+model MonitorObservation {
+  id          String   @id @default(cuid())
+  monitorId   String
+  projectId   String
+  at          DateTime @default(now())
+  active      Boolean
+  promptCount Int
+  modelCount  Int
+
+  @@index([monitorId, at])
+  @@index([at])
+}
+
+// Response allocations and actuals are independent of schedules and survive removal.
+model ResponseAllocation {
+  projectId String
+  cycleStart String
+  responses Int
+  importance String @default("normal")
+  updatedAt DateTime @updatedAt
+  @@id([projectId, cycleStart])
+}
+
+model ResponseUsage {
+  timezone String
+  projectId String
+  start String
+  end String // exclusive calendar date
+  responses Int
+  observedAt DateTime @default(now())
+  @@id([projectId, start, end, timezone])
+}
+
+// Official consumption counters, separate from dated response records.
+model ResponseUsageReport {
+  periodFrom DateTime @id
+  periodTo DateTime
+  responses Int
+  providerLimit Int
+  projects Json
+  observedAt DateTime @default(now())
 }

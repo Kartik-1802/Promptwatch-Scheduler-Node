@@ -1,3 +1,4 @@
+import { activityStart } from "./activity";
 import { prisma } from "./db";
 import { ApiError, PromptwatchClient } from "./promptwatch";
 import { log } from "./store";
@@ -58,6 +59,10 @@ export async function applyActive(
       );
       continue;
     }
+    await prisma.monitor.update({
+      where: { id: monitorId },
+      data: { active, activeSince: activityStart(monitor, active), nextRetryAt: null, overrideUntil: overrideUntilByProject.get(monitor.projectId) ?? null },
+    });
     changed.push(monitorId);
     await log(
       "info", "manual",
@@ -66,18 +71,6 @@ export async function applyActive(
     );
   }
 
-  if (changed.length) {
-    await Promise.all(
-      changed.map((monitorId) => {
-        const monitor = byId.get(monitorId)!;
-        const overrideUntil = overrideUntilByProject.get(monitor.projectId) ?? null;
-        return prisma.monitor.update({
-          where: { id: monitorId },
-          data: { active, nextRetryAt: null, overrideUntil },
-        });
-      })
-    );
-  }
   return { changed, failed };
 }
 
@@ -92,7 +85,7 @@ export async function removeMonitors(monitorIds: string[], actor: string): Promi
   const monitors = await prisma.monitor.findMany({ where: { id: { in: monitorIds } } });
   if (!monitors.length) return { removed: [] };
 
-  await prisma.monitor.deleteMany({ where: { id: { in: monitors.map((m) => m.id) } } });
+  await prisma.monitor.deleteMany({ where: { id: { in: monitors.map(m => m.id) } } });
 
   const byProject = new Map<string, string[]>();
   for (const m of monitors) byProject.set(m.projectName, [...(byProject.get(m.projectName) ?? []), m.name]);

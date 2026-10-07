@@ -1,3 +1,4 @@
+import { responseState } from "./responses";
 import { prisma } from "./db";
 import { parseStringArray } from "./json";
 import { evaluate, getLastTickAt, nextTransition, toBlockLike } from "./scheduler";
@@ -6,6 +7,11 @@ import { partsAt } from "./tz";
 
 export async function buildState() {
   const settings = await getSettings();
+  // Existing ON monitors have no trustworthy historical activation time.
+  await prisma.monitor.updateMany({
+    where: { active: true, activeSince: null },
+    data: { activeSince: new Date() },
+  });
   const parts = partsAt(new Date(), settings.timezone);
   const minutes = parts.hour * 60 + parts.minute;
 
@@ -24,6 +30,7 @@ export async function buildState() {
     name: m.name,
     description: m.description,
     active: m.active,
+    activeSince: m.activeSince?.toISOString() ?? null,
     models: parseStringArray(m.models),
     languageCode: m.languageCode,
     countryCode: m.countryCode,
@@ -68,6 +75,7 @@ export async function buildState() {
   });
 
   return {
+    responses: await responseState(projects, monitors, settings.timezone, settings.schedulerEnabled),
     settings: publicSettings(settings),
     projects,
     monitors,

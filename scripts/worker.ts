@@ -3,6 +3,7 @@
  * so it's independent of the Next.js request/response lifecycle and its edge/node
  * dual bundling — a plain, long-running Node script talking to the same Postgres
  * database as the web app. Run with: npx tsx scripts/worker.ts */
+import { startResponseUsageLoop } from "../src/lib/response-usage-loop";
 import { ensureSuperAdmin } from "../src/lib/auth";
 import { prisma } from "../src/lib/db";
 import { startSchedulerLoop } from "../src/lib/scheduler";
@@ -12,6 +13,7 @@ async function main() {
   await ensureSuperAdmin();
   await log("info", "server", "Scheduler worker started");
   startSchedulerLoop();
+  startResponseUsageLoop();
 }
 
 main().catch((err) => {

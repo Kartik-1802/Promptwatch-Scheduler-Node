@@ -52,8 +52,7 @@
     <div>
       <div class="side-head">
         <a href="#" class="side-logo" id="homeLink" title="ContentNinja — back to Projects" aria-label="ContentNinja — back to Projects">
-          <svg class="mark"><use href="#i-cn-mark"></use></svg>
-          <b>Content<span>Ninja</span></b>
+          <img class="brand-image" src="/contentninja-logo.png" alt="ContentNinja" width="1755" height="520">
         </a>
       </div>
 
@@ -109,7 +108,7 @@
 
   <header class="topbar">
     <div class="crumb">
-      <span class="ctx">Promptwatch</span>
+      <a href="#" class="ctx" id="promptwatchHome" aria-label="Promptwatch — all projects">Promptwatch</a>
       <span class="sep ctx">/</span>
       <span class="here" id="crumbHere">Monitor &amp; Scheduler Hub</span>
     </div>
@@ -118,25 +117,18 @@
   <main class="content">
    <div class="page">
 
-    <!-- Back link lives at the very top, above everything else, whenever a
-         project is open. -->
-    <div class="crumbs hidden" id="crumbs">
-      <button id="backToProjects" class="btn ghost" aria-label="Back to all projects">
-        <svg><use href="#i-back"></use></svg>All projects
-      </button>
-    </div>
-
     <div class="page-head">
       <div>
         <div class="eyebrow" id="pageEyebrow">Hub control plane</div>
         <h1 id="pageTitle">Projects</h1>
-        <p class="sub" id="pageSub">Pick a project to see its monitors, or manage everything at once.</p>
+        <p class="sub" id="pageSub">Manage monitors and schedules in one place.</p>
       </div>
     </div>
 
     <!-- PROJECTS (homepage) -->
     <section id="tab-monitors" class="panel">
       <div class="stats-block one" id="statsBlock"></div>
+      <div id="responseOverview" class="response-overview"></div>
 
       <!-- PROJECT LIST — every project and its schedule at a glance -->
       <div id="projectsView">
@@ -218,6 +210,7 @@
     <!-- ALL MONITORS (flat, across every project — view/activate only; scheduling is project-level, see Projects) -->
     <section id="tab-allmonitors" class="panel hidden">
       <div class="stats-block one" id="allMonStatsBlock"></div>
+      <div id="allResponsePeriod" class="all-response-period"></div>
       <div class="toolbar">
         <label class="search grow" style="max-width:420px">
           <svg><use href="#i-search"></use></svg>
