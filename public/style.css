@@ -1046,3 +1046,6 @@ textarea.input { height: auto; padding: var(--s-sm) var(--s-md); font-family: va
 .prow:hover .project-name-heading > .chev { opacity: 1; }
 .project-name-heading .formula-info-button, .mname .formula-info-button { width: 16px; height: 16px; font-size: 10px; }
 #allResponsePeriod { justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+
+.scheduler-reminder { margin-bottom: 20px; padding: 14px 18px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--canvas); color: var(--ink-secondary); font-size: 13px; line-height: 1.7; }
+.scheduler-reminder strong { display: block; color: var(--ink-primary); margin-bottom: 4px; }

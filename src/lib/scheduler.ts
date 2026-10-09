@@ -253,10 +253,10 @@ let intervalHandle: ReturnType<typeof setTimeout> | null = null;
 export function startSchedulerLoop() {
   if (intervalHandle) return; // already running (e.g. hot reload in dev)
   const runOnce = async () => {
-    let seconds = 60;
+    let seconds = 180;
     try {
       const settings = await prisma.settings.findUnique({ where: { id: 1 } });
-      seconds = Math.max(10, settings?.tickSeconds ?? 60);
+      seconds = Math.max(10, settings?.tickSeconds ?? 180);
 
       if (settings?.schedulerEnabled && settings.apiKey) {
         try {

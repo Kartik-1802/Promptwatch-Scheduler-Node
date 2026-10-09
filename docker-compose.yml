@@ -30,7 +30,7 @@ services:
       PROMPTWATCH_BASE_URL: ${PROMPTWATCH_BASE_URL:-https://server.promptwatch.com/api/v2}
     ports:
       - "3000:3000"
-    command: sh -c "npx prisma db push --accept-data-loss && npm run start"
+    command: sh -c "npx prisma db push --accept-data-loss && npx prisma db execute --schema prisma/schema.prisma --file db/migrations/20261009_sync_interval.sql && npm run start"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 10s

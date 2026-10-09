@@ -33,7 +33,7 @@ model Settings {
   id               Int       @id @default(1)
   apiKey           String?
   timezone         String    @default("Asia/Kolkata")
-  tickSeconds      Int       @default(60)
+  tickSeconds      Int       @default(180)
   schedulerEnabled Boolean   @default(true)
   lastSyncAt       DateTime?
 }

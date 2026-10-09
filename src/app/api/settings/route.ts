@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       data.timezone = body.timezone;
     }
     if ("tickSeconds" in body) {
-      data.tickSeconds = Math.max(10, parseInt(body.tickSeconds, 10) || 60);
+      data.tickSeconds = Math.max(10, parseInt(body.tickSeconds, 10) || 180);
     }
     if ("schedulerEnabled" in body) {
       data.schedulerEnabled = Boolean(body.schedulerEnabled);
